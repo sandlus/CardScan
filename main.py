@@ -189,10 +189,10 @@ def get_connection():
 # ================= FASTAPI =================
 app = FastAPI()
 
-# ================= CORS (FIXED) =================
+# ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ✅ no more OPTIONS 400
+    allow_origins=["*"],   # change in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -209,7 +209,7 @@ class ScanCard(BaseModel):
     address: str | None = None
     notes: str | None = None
 
-    # ✅ allow empty email but validate if filled
+    # allow empty email but validate if filled
     @field_validator("email", mode="before")
     @classmethod
     def empty_email_to_none(cls, v):
@@ -230,12 +230,12 @@ def health():
 @app.post("/save-card")
 def save_card(data: ScanCard):
     try:
-        print("Incoming Data:", data)  # debug
+        print("Incoming Data:", data)
 
         conn = get_connection()
         cursor = conn.cursor()
 
-        # ✅ safe mobile handling
+        # safe mobile parsing
         phone_value = None
         if data.mobile:
             digits = "".join(ch for ch in str(data.mobile) if ch.isdigit())
@@ -283,7 +283,7 @@ def save_card(data: ScanCard):
         }
 
     except Exception as e:
-        print("ERROR:", str(e))  # debug log
+        print("ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 # ================= GET ALL =================
@@ -304,13 +304,26 @@ def get_cards():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ================= SERVE REACT =================
-app.mount("/static", StaticFiles(directory="build/static"), name="static")
+# ================= SERVE REACT (SAFE) =================
+BUILD_DIR = "build"
 
+# Mount static only if exists
+static_path = os.path.join(BUILD_DIR, "static")
+if os.path.exists(static_path):
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
+
+# Root route
 @app.get("/")
 def serve_react():
-    return FileResponse("build/index.html")
+    index_path = os.path.join(BUILD_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"status": "API running"}  # fallback
 
+# React Router support
 @app.get("/{full_path:path}")
 def serve_react_app(full_path: str):
-    return FileResponse("build/index.html")
+    index_path = os.path.join(BUILD_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"error": "Frontend not built"}
