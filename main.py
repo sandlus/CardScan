@@ -170,7 +170,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, field_validator
-from components.catalog import router as category_router
+from components.catalog import router as catalog_router
 
 # Load env
 load_dotenv()
@@ -223,7 +223,7 @@ def clean(val):
     return val.strip() if val and str(val).strip() else None
 
 # 🔗 Register single router
-app.include_router(category_router)
+app.include_router(catalog_router)
 
 # ================= API =================
 @app.get("/api/health")

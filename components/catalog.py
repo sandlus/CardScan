@@ -1,82 +1,12 @@
-
-
-# from fastapi import APIRouter, Query
-# from components.db import get_connection
-
-# router = APIRouter()
-
-
-# @router.get("/Select_category")
-# def get_categories():
-#     conn = get_connection()
-#     cursor = conn.cursor(dictionary=True)
-
-#     try:
-#         query = """
-#             SELECT MIN(cat_id) AS cat_id, cat_name
-#             FROM category
-#             WHERE cat_name IS NOT NULL
-#               AND cat_name <> ''
-#             GROUP BY cat_name
-#             ORDER BY cat_name ASC
-#         """
-#         cursor.execute(query)
-#         result = cursor.fetchall()
-
-#         return {
-#             "status": True,
-#             "data": result
-#         }
-
-#     except Exception as e:
-#         return {
-#             "status": False,
-#             "error": str(e)
-#         }
-
-#     finally:
-#         cursor.close()
-#         conn.close()
-
-
-# @router.get("/Product_code")
-# def get_products(cat_id: int = Query(...)):
-#     conn = get_connection()
-#     cursor = conn.cursor(dictionary=True)
-
-#     try:
-#         query = """
-#             SELECT DISTINCT product_name, item_code
-#             FROM items
-#             WHERE cat_id = %s
-#               AND product_name IS NOT NULL
-#               AND product_name <> ''
-#             ORDER BY product_name ASC
-#         """
-#         cursor.execute(query, (cat_id,))
-#         result = cursor.fetchall()
-
-#         return {
-#             "status": True,
-#             "data": result
-#         }
-
-#     except Exception as e:
-#         return {
-#             "status": False,
-#             "error": str(e)
-#         }
-
-#     finally:
-#         cursor.close()
-#         conn.close() 
-
 from fastapi import APIRouter, Query
 from components.db import get_connection
 
 router = APIRouter()
 
 
+# =========================
+# 1. CATEGORY DROPDOWN
+# =========================
 @router.get("/Select_category")
 def get_categories():
     conn = None
@@ -94,6 +24,7 @@ def get_categories():
             GROUP BY cat_name
             ORDER BY cat_name ASC
         """
+
         cursor.execute(query)
         result = cursor.fetchall()
 
@@ -109,12 +40,15 @@ def get_categories():
         }
 
     finally:
-        if cursor is not None:
+        if cursor:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if conn and conn.is_connected():
             conn.close()
 
 
+# =========================
+# 2. PRODUCT DROPDOWN
+# =========================
 @router.get("/Product_code")
 def get_products(cat_id: int = Query(...)):
     conn = None
@@ -125,24 +59,30 @@ def get_products(cat_id: int = Query(...)):
         cursor = conn.cursor(dictionary=True)
 
         query = """
-            SELECT product_name, MIN(item_code) AS item_code
+            SELECT DISTINCT product_name
             FROM item
             WHERE cat_id = %s
               AND product_name IS NOT NULL
               AND TRIM(product_name) <> ''
-            GROUP BY product_name
             ORDER BY product_name ASC
         """
+
         cursor.execute(query, (cat_id,))
         result = cursor.fetchall()
 
-        return {"status": True, "data": result}
+        return {
+            "status": True,
+            "data": result
+        }
 
     except Exception as e:
-        return {"status": False, "error": str(e)}
+        return {
+            "status": False,
+            "error": str(e)
+        }
 
     finally:
-        if cursor: cursor.close()
-        if conn and conn.is_connected(): conn.close()
-
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
