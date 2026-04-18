@@ -28,8 +28,8 @@ def get_categories():
         rows = cursor.fetchall()
 
         result = [
-            {"cat_id": row[0], "cat_name": row[1]}
-            for row in rows
+            {"cat_id": r[0], "cat_name": r[1]}
+            for r in rows
         ]
 
         return {"status": True, "data": result}
@@ -42,6 +42,8 @@ def get_categories():
             cursor.close()
         if conn:
             conn.close()
+
+
 # =========================
 # 2. PRODUCT DROPDOWN
 # =========================
@@ -52,7 +54,7 @@ def get_products(cat_id: int = Query(...)):
 
     try:
         conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
 
         query = """
             SELECT DISTINCT product_name
@@ -64,18 +66,17 @@ def get_products(cat_id: int = Query(...)):
         """
 
         cursor.execute(query, (cat_id,))
-        result = cursor.fetchall()
+        rows = cursor.fetchall()
 
-        return {
-            "status": True,
-            "data": result
-        }
+        result = [
+            {"product_name": r[0]}
+            for r in rows
+        ]
+
+        return {"status": True, "data": result}
 
     except Exception as e:
-        return {
-            "status": False,
-            "error": str(e)
-        }
+        return {"status": False, "error": str(e)}
 
     finally:
         if cursor:
