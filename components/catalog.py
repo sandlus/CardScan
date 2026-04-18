@@ -136,19 +136,13 @@ def get_products(cat_id: int = Query(...)):
         cursor.execute(query, (cat_id,))
         result = cursor.fetchall()
 
-        return {
-            "status": True,
-            "data": result
-        }
+        return {"status": True, "data": result}
 
     except Exception as e:
-        return {
-            "status": False,
-            "error": str(e)
-        }
+        return {"status": False, "error": str(e)}
 
     finally:
-        if cursor is not None:
-            cursor.close()
-        if conn is not None and conn.is_connected():
-            conn.close()
+        if cursor: cursor.close()
+        if conn and conn.is_connected(): conn.close()
+
+        conn.close()
