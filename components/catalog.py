@@ -32,10 +32,16 @@ def get_categories():
             for r in rows
         ]
 
-        return {"status": True, "data": result}
+        return {
+            "status": True,
+            "data": result
+        }
 
     except Exception as e:
-        return {"status": False, "error": str(e)}
+        return {
+            "status": False,
+            "error": str(e)
+        }
 
     finally:
         if cursor:
@@ -73,10 +79,16 @@ def get_products(cat_id: int = Query(...)):
             for r in rows
         ]
 
-        return {"status": True, "data": result}
+        return {
+            "status": True,
+            "data": result
+        }
 
     except Exception as e:
-        return {"status": False, "error": str(e)}
+        return {
+            "status": False,
+            "error": str(e)
+        }
 
     finally:
         if cursor:
