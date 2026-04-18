@@ -14,7 +14,7 @@ def get_categories():
 
     try:
         conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
 
         query = """
             SELECT DISTINCT cat_id, cat_name
@@ -25,7 +25,12 @@ def get_categories():
         """
 
         cursor.execute(query)
-        result = cursor.fetchall()
+        rows = cursor.fetchall()
+
+        result = [
+            {"cat_id": row[0], "cat_name": row[1]}
+            for row in rows
+        ]
 
         return {"status": True, "data": result}
 
