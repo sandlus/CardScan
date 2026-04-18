@@ -81,6 +81,7 @@ router = APIRouter()
 def get_categories():
     conn = None
     cursor = None
+
     try:
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
@@ -89,7 +90,7 @@ def get_categories():
             SELECT MIN(cat_id) AS cat_id, cat_name
             FROM category
             WHERE cat_name IS NOT NULL
-              AND cat_name <> ''
+              AND TRIM(cat_name) <> ''
             GROUP BY cat_name
             ORDER BY cat_name ASC
         """
@@ -108,9 +109,9 @@ def get_categories():
         }
 
     finally:
-        if cursor:
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None and conn.is_connected():
             conn.close()
 
 
@@ -118,16 +119,18 @@ def get_categories():
 def get_products(cat_id: int = Query(...)):
     conn = None
     cursor = None
+
     try:
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
 
         query = """
-            SELECT DISTINCT product_name, item_code
-            FROM items
+            SELECT product_name, MIN(item_code) AS item_code
+            FROM item
             WHERE cat_id = %s
               AND product_name IS NOT NULL
-              AND product_name <> ''
+              AND TRIM(product_name) <> ''
+            GROUP BY product_name
             ORDER BY product_name ASC
         """
         cursor.execute(query, (cat_id,))
@@ -145,7 +148,7 @@ def get_products(cat_id: int = Query(...)):
         }
 
     finally:
-        if cursor:
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None and conn.is_connected():
             conn.close()
