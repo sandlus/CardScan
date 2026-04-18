@@ -17,11 +17,10 @@ def get_categories():
         cursor = conn.cursor(dictionary=True)
 
         query = """
-            SELECT cat_id, cat_name
+            SELECT DISTINCT cat_id, cat_name
             FROM category
             WHERE cat_name IS NOT NULL
-            AND TRIM(cat_name) <> ''
-            GROUP BY cat_id, cat_name
+              AND TRIM(cat_name) <> ''
             ORDER BY cat_name ASC
         """
 
@@ -36,10 +35,8 @@ def get_categories():
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if conn:
             conn.close()
-
-
 # =========================
 # 2. PRODUCT DROPDOWN
 # =========================
@@ -78,5 +75,5 @@ def get_products(cat_id: int = Query(...)):
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if conn:
             conn.close()
