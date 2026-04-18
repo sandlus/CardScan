@@ -17,27 +17,21 @@ def get_categories():
         cursor = conn.cursor(dictionary=True)
 
         query = """
-            SELECT MIN(cat_id) AS cat_id, cat_name
+            SELECT cat_id, cat_name
             FROM category
             WHERE cat_name IS NOT NULL
-              AND TRIM(cat_name) <> ''
-            GROUP BY cat_name
+            AND TRIM(cat_name) <> ''
+            GROUP BY cat_id, cat_name
             ORDER BY cat_name ASC
         """
 
         cursor.execute(query)
         result = cursor.fetchall()
 
-        return {
-            "status": True,
-            "data": result
-        }
+        return {"status": True, "data": result}
 
     except Exception as e:
-        return {
-            "status": False,
-            "error": str(e)
-        }
+        return {"status": False, "error": str(e)}
 
     finally:
         if cursor:
