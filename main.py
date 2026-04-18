@@ -1,13 +1,24 @@
 # import os
+# from datetime import datetime
+
+# import pymysql
+# from dotenv import load_dotenv
 # from fastapi import FastAPI, HTTPException
 # from fastapi.middleware.cors import CORSMiddleware
+# from fastapi.responses import FileResponse
+# from fastapi.staticfiles import StaticFiles
 # from pydantic import BaseModel, EmailStr
-# from dotenv import load_dotenv
-# import pymysql
-# from datetime import datetime
+
 
 # # Load env
 # load_dotenv()
+
+
+# # ================= ENV HELPERS =================
+# def parse_csv_env(name: str, default: str = ""):
+#     value = os.getenv(name, default)
+#     return [item.strip() for item in value.split(",") if item.strip()]
+
 
 # # ================= DB CONNECTION =================
 # def get_connection():
@@ -21,17 +32,23 @@
 #         autocommit=True
 #     )
 
+
 # # ================= FASTAPI =================
 # app = FastAPI()
 
+
 # # ================= CORS =================
+# allowed_origins = parse_csv_env("ALLOWED_ORIGINS")
+# allow_credentials = os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true"
+
 # app.add_middleware(
 #     CORSMiddleware,
-#     allow_origins=["*"],  # 🔴 change in production
-#     allow_credentials=True,
+#     allow_origins=allowed_origins,
+#     allow_credentials=allow_credentials,
 #     allow_methods=["*"],
 #     allow_headers=["*"],
 # )
+
 
 # # ================= PYDANTIC MODEL =================
 # class ScanCard(BaseModel):
@@ -44,10 +61,12 @@
 #     address: str | None = None
 #     notes: str | None = None
 
-# # ================= HEALTH =================
-# @app.get("/")
+
+# # ================= API HEALTH =================
+# @app.get("/api/health")
 # def health():
 #     return {"status": "API running"}
+
 
 # # ================= SAVE DATA =================
 # @app.post("/save-card")
@@ -55,6 +74,11 @@
 #     try:
 #         conn = get_connection()
 #         cursor = conn.cursor()
+
+#         phone_value = None
+#         if data.mobile:
+#             digits = "".join(ch for ch in data.mobile if ch.isdigit())
+#             phone_value = int(digits) if digits else None
 
 #         query = """
 #         INSERT INTO scan_cards (
@@ -73,16 +97,16 @@
 #         """
 
 #         cursor.execute(query, (
-#             int(data.mobile) if data.mobile else None,  # phone (bigint)
+#             phone_value,
 #             data.customerCompany,
 #             data.personName,
 #             data.designation,
 #             data.email,
 #             data.address,
 #             data.level,
-#             data.notes,  # mapping notes → remark
-#             datetime.now(),  # added_date
-#             1  # 🔴 you can later replace with logged-in user ID
+#             data.notes,
+#             datetime.now(),
+#             1
 #         ))
 
 #         inserted_id = cursor.lastrowid
@@ -98,6 +122,7 @@
 
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
+
 
 # # ================= GET ALL =================
 # @app.get("/cards")
@@ -117,6 +142,24 @@
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
 
+
+# # ================= SERVE REACT BUILD =================
+
+# # Static files (JS, CSS)
+# app.mount("/static", StaticFiles(directory="build/static"), name="static")
+
+
+# # Root → React app
+# @app.get("/")
+# def serve_react():
+#     return FileResponse("build/index.html")
+
+
+# # Handle all frontend routes (React Router)
+# @app.get("/{full_path:path}")
+# def serve_react_app(full_path: str):
+#     return FileResponse("build/index.html") 
+
 import os
 from datetime import datetime
 
@@ -126,18 +169,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, EmailStr
-
+from pydantic import BaseModel, EmailStr, field_validator
 
 # Load env
 load_dotenv()
-
-
-# ================= ENV HELPERS =================
-def parse_csv_env(name: str, default: str = ""):
-    value = os.getenv(name, default)
-    return [item.strip() for item in value.split(",") if item.strip()]
-
 
 # ================= DB CONNECTION =================
 def get_connection():
@@ -151,25 +186,19 @@ def get_connection():
         autocommit=True
     )
 
-
 # ================= FASTAPI =================
 app = FastAPI()
 
-
-# ================= CORS =================
-allowed_origins = parse_csv_env("ALLOWED_ORIGINS")
-allow_credentials = os.getenv("ALLOW_CREDENTIALS", "true").lower() == "true"
-
+# ================= CORS (FIXED) =================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=allow_credentials,
+    allow_origins=["*"],  # ✅ no more OPTIONS 400
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ================= PYDANTIC MODEL =================
+# ================= MODEL =================
 class ScanCard(BaseModel):
     level: str | None = None
     customerCompany: str | None = None
@@ -180,24 +209,38 @@ class ScanCard(BaseModel):
     address: str | None = None
     notes: str | None = None
 
+    # ✅ allow empty email but validate if filled
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
 
-# ================= API HEALTH =================
+# ================= HELPERS =================
+def clean(val):
+    return val.strip() if val and str(val).strip() else None
+
+# ================= API =================
 @app.get("/api/health")
 def health():
     return {"status": "API running"}
-
 
 # ================= SAVE DATA =================
 @app.post("/save-card")
 def save_card(data: ScanCard):
     try:
+        print("Incoming Data:", data)  # debug
+
         conn = get_connection()
         cursor = conn.cursor()
 
+        # ✅ safe mobile handling
         phone_value = None
         if data.mobile:
-            digits = "".join(ch for ch in data.mobile if ch.isdigit())
-            phone_value = int(digits) if digits else None
+            digits = "".join(ch for ch in str(data.mobile) if ch.isdigit())
+            if digits:
+                phone_value = int(digits)
 
         query = """
         INSERT INTO scan_cards (
@@ -217,13 +260,13 @@ def save_card(data: ScanCard):
 
         cursor.execute(query, (
             phone_value,
-            data.customerCompany,
-            data.personName,
-            data.designation,
-            data.email,
-            data.address,
-            data.level,
-            data.notes,
+            clean(data.customerCompany),
+            clean(data.personName),
+            clean(data.designation),
+            clean(data.email),
+            clean(data.address),
+            clean(data.level),
+            clean(data.notes),
             datetime.now(),
             1
         ))
@@ -240,8 +283,8 @@ def save_card(data: ScanCard):
         }
 
     except Exception as e:
+        print("ERROR:", str(e))  # debug log
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ================= GET ALL =================
 @app.get("/cards")
@@ -261,20 +304,13 @@ def get_cards():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ================= SERVE REACT BUILD =================
-
-# Static files (JS, CSS)
+# ================= SERVE REACT =================
 app.mount("/static", StaticFiles(directory="build/static"), name="static")
 
-
-# Root → React app
 @app.get("/")
 def serve_react():
     return FileResponse("build/index.html")
 
-
-# Handle all frontend routes (React Router)
 @app.get("/{full_path:path}")
 def serve_react_app(full_path: str):
     return FileResponse("build/index.html")
