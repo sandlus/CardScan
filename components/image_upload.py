@@ -40,7 +40,8 @@ async def upload_scanned_card_image(
         print("PHP Response:", response.text)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=500, detail="PHP server upload failed")
+            print("❌ FULL PHP ERROR:", response.text)
+            raise HTTPException(status_code=500, detail=response.text)
 
         try:
             result = response.json()
