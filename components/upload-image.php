@@ -2,12 +2,15 @@
 
 header("Content-Type: application/json");
 
-$targetDir = "../uploads/images/";
+// ✅ FIX: use absolute path
+$targetDir = __DIR__ . "/uploads/images/";
 
+// ensure folder exists
 if (!file_exists($targetDir)) {
     mkdir($targetDir, 0777, true);
 }
 
+// check file
 if (!isset($_FILES['image'])) {
     echo json_encode([
         "status" => false,
@@ -18,13 +21,15 @@ if (!isset($_FILES['image'])) {
 
 $file = $_FILES['image'];
 
-$extension = pathinfo($file["name"], PATHINFO_EXTENSION);
+// safe extension handling
+$extension = strtolower(pathinfo($file["name"], PATHINFO_EXTENSION));
 
-// 👉 unique filename
+// generate unique filename
 $filename = time() . "_front_" . uniqid() . "." . $extension;
 
 $targetFile = $targetDir . $filename;
 
+// move file
 if (move_uploaded_file($file["tmp_name"], $targetFile)) {
 
     $url = "https://demoapp.sandlus.in/uploads/images/" . $filename;
@@ -35,8 +40,10 @@ if (move_uploaded_file($file["tmp_name"], $targetFile)) {
         "url" => $url
     ]);
 } else {
+
     echo json_encode([
         "status" => false,
-        "message" => "Failed to upload"
+        "message" => "Failed to upload",
+        "debug" => error_get_last()
     ]);
 }
