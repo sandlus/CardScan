@@ -3,3 +3,4 @@ uvicorn[standard]
 pymysql
 python-dotenv
 email-validator
+requests
