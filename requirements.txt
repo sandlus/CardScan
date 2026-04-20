@@ -4,3 +4,4 @@ pymysql
 python-dotenv
 email-validator
 requests
+python-multipart
