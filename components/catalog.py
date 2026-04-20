@@ -48,11 +48,11 @@ def get_products(cat_id: int = Query(...)):
         cursor = conn.cursor(pymysql.cursors.DictCursor)  # ✅ FIX
 
         query = """
-            SELECT DISTINCT product_name, item_code
+            SELECT item_id, product_name
             FROM item
             WHERE cat_id = %s
-              AND product_name IS NOT NULL
-              AND TRIM(product_name) <> ''
+            AND product_name IS NOT NULL
+            AND TRIM(product_name) <> ''
             ORDER BY product_name ASC
         """
 
