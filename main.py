@@ -444,7 +444,7 @@ def save_card(data: ScanCard):
             person_name,
             designation,
             phone,
-            phone2,
+            other_phone,
             email,
             email2,
             address,
@@ -453,7 +453,7 @@ def save_card(data: ScanCard):
             added_date,
             added_by
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
         """
 
         cursor.execute(query, (
