@@ -7,46 +7,62 @@ load_dotenv()
 
 router = APIRouter()
 
-# ✅ From .env
 PHP_UPLOAD_URL = os.getenv("PHP_UPLOAD_URL")
 
 
 @router.post("/upload-scanned-card-image")
 async def upload_scanned_card_image(
-    captured_image: UploadFile = File(...),
+    image: UploadFile = File(...),
     source: str = Form(None),
     timestamp: str = Form(None)
 ):
     try:
-        if not captured_image:
+        if not image:
             raise HTTPException(status_code=400, detail="No image file provided")
+
+        # ✅ Read file content safely
+        file_content = await image.read()
+        await image.seek(0)  # reset pointer (good practice)
 
         files = {
             "image": (
-                captured_image.filename,
-                captured_image.file,
-                captured_image.content_type or "image/jpeg"
+                image.filename or "upload.jpg",
+                file_content,
+                image.content_type or "image/jpeg"
             )
         }
 
         data = {
-            "source": source,
-            "timestamp": timestamp
+            "source": source or "",
+            "timestamp": timestamp or ""
         }
 
-        response = requests.post(PHP_UPLOAD_URL, files=files, data=data)
+        # ✅ More browser-like headers (better chance to bypass ModSecurity)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Origin": "https://demoapp.sandlus.in",
+            "Referer": "https://demoapp.sandlus.in/",
+            "Connection": "keep-alive"
+        }
+
+        response = requests.post(
+            PHP_UPLOAD_URL,
+            files=files,
+            data=data,
+            headers=headers,
+            timeout=30
+        )
 
         print("PHP Status:", response.status_code)
         print("PHP Response:", response.text)
 
         if response.status_code != 200:
-            print("❌ FULL PHP ERROR:", response.text)
             raise HTTPException(status_code=500, detail=response.text)
 
         try:
             result = response.json()
         except Exception:
-            print("❌ RAW PHP RESPONSE:", response.text)
             raise HTTPException(
                 status_code=500,
                 detail=f"Invalid PHP response: {response.text}"
