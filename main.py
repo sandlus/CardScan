@@ -440,7 +440,6 @@ def save_card(data: ScanCard):
         INSERT INTO scan_cards (
             type,
             level,
-            product,
             customer_company,
             person_name,
             designation,
@@ -454,13 +453,12 @@ def save_card(data: ScanCard):
             added_date,
             added_by
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         cursor.execute(query, (
             clean(data.type),
             clean(data.level),
-            clean(data.product),
             clean(data.customerCompany),
             clean(data.personName),
             clean(data.designation),
