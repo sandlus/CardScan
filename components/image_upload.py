@@ -1,5 +1,5 @@
-
 import os
+import time
 import base64
 import requests
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
@@ -34,20 +34,40 @@ async def upload_scanned_card_image(
         if not file_content:
             raise HTTPException(status_code=400, detail="Empty image file")
 
+        # safe extension detect
+        extension = "jpg"
+        if image.filename and "." in image.filename:
+            extension = image.filename.rsplit(".", 1)[-1].lower()
+
+        # timestamp-based filename
+        safe_filename = f"img_{int(time.time() * 1000)}.{extension}"
+
         print("===== FASTAPI IMAGE DEBUG =====")
-        print("Filename:", image.filename)
+        print("Original Filename:", image.filename)
+        print("Generated Filename:", safe_filename)
         print("Content-Type:", image.content_type)
         print("Size:", len(file_content))
         print("Name:", name)
         print("Phone:", phone)
+        print("Email:", email)
+        print("Company:", company)
+        print("Source:", source)
+        print("Timestamp:", timestamp)
         print("CI_QR_SAVE_URL:", CI_QR_SAVE_URL)
         print("================================")
 
+        # convert image to base64
         image_base64 = base64.b64encode(file_content).decode("utf-8")
 
+        # send JSON to CI controller
         payload = {
             "name": name or "",
             "phone": phone or "",
+            "email": email or "",
+            "company": company or "",
+            "source": source or "",
+            "timestamp": timestamp or "",
+            "filename": safe_filename,
             "qr_image": image_base64
         }
 
@@ -82,7 +102,7 @@ async def upload_scanned_card_image(
 
         return {
             "status": True,
-            "filename": result.get("file"),
+            "filename": result.get("file") or safe_filename,
             "image_url": result.get("image_url", ""),
             "message": "Image uploaded and saved successfully"
         }
@@ -92,4 +112,3 @@ async def upload_scanned_card_image(
     except Exception as e:
         print("Upload error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    
