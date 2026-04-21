@@ -39,11 +39,8 @@ async def upload_scanned_card_image(
 
         # ✅ More browser-like headers (better chance to bypass ModSecurity)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Origin": "https://demoapp.sandlus.in",
-            "Referer": "https://demoapp.sandlus.in/",
-            "Connection": "keep-alive"
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "*/*"
         }
 
         response = requests.post(
