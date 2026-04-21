@@ -1,6 +1,4 @@
 import os
-import time
-import base64
 import requests
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from dotenv import load_dotenv
@@ -9,7 +7,7 @@ load_dotenv()
 
 router = APIRouter()
 
-CI_QR_SAVE_URL = os.getenv("CI_QR_SAVE_URL")
+PHP_UPLOAD_URL = os.getenv("PHP_UPLOAD_URL")
 
 
 @router.post("/upload-scanned-card-image")
@@ -26,64 +24,54 @@ async def upload_scanned_card_image(
         if not image:
             raise HTTPException(status_code=400, detail="No image file provided")
 
-        if not CI_QR_SAVE_URL:
-            raise HTTPException(status_code=500, detail="CI_QR_SAVE_URL is missing in .env")
+        if not PHP_UPLOAD_URL:
+            raise HTTPException(status_code=500, detail="PHP_UPLOAD_URL is missing in .env")
 
         file_content = await image.read()
 
         if not file_content:
             raise HTTPException(status_code=400, detail="Empty image file")
 
-        # safe extension detect
-        extension = "jpg"
-        if image.filename and "." in image.filename:
-            extension = image.filename.rsplit(".", 1)[-1].lower()
-
-        # timestamp-based filename
-        safe_filename = f"img_{int(time.time() * 1000)}.{extension}"
-
         print("===== FASTAPI IMAGE DEBUG =====")
-        print("Original Filename:", image.filename)
-        print("Generated Filename:", safe_filename)
+        print("Filename:", image.filename)
         print("Content-Type:", image.content_type)
         print("Size:", len(file_content))
-        print("Name:", name)
-        print("Phone:", phone)
-        print("Email:", email)
-        print("Company:", company)
         print("Source:", source)
         print("Timestamp:", timestamp)
-        print("CI_QR_SAVE_URL:", CI_QR_SAVE_URL)
+        print("PHP_UPLOAD_URL:", PHP_UPLOAD_URL)
         print("================================")
 
-        # convert image to base64
-        image_base64 = base64.b64encode(file_content).decode("utf-8")
+        files = {
+            "image": (
+                image.filename or "upload.jpg",
+                file_content,
+                image.content_type or "image/jpeg"
+            )
+        }
 
-        # send JSON to CI controller
-        payload = {
+        data = {
+            "source": source or "",
+            "timestamp": timestamp or "",
             "name": name or "",
             "phone": phone or "",
             "email": email or "",
-            "company": company or "",
-            "source": source or "",
-            "timestamp": timestamp or "",
-            "filename": safe_filename,
-            "qr_image": image_base64
+            "company": company or ""
         }
 
         response = requests.post(
-            CI_QR_SAVE_URL,
-            json=payload,
+            PHP_UPLOAD_URL,
+            files=files,
+            data=data,
             timeout=30
         )
 
-        print("CI Status:", response.status_code)
-        print("CI Response:", response.text)
+        print("PHP Status:", response.status_code)
+        print("PHP Response:", response.text)
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=500,
-                detail=f"CI returned {response.status_code}: {response.text}"
+                detail=f"PHP returned {response.status_code}: {response.text}"
             )
 
         try:
@@ -91,20 +79,20 @@ async def upload_scanned_card_image(
         except Exception:
             raise HTTPException(
                 status_code=500,
-                detail=f"Invalid CI response: {response.text}"
+                detail=f"Invalid PHP response: {response.text}"
             )
 
         if not result.get("status"):
             raise HTTPException(
                 status_code=500,
-                detail=result.get("message", "Image save failed on CI")
+                detail=result.get("message", "Image upload failed on PHP")
             )
 
         return {
             "status": True,
-            "filename": result.get("file") or safe_filename,
-            "image_url": result.get("image_url", ""),
-            "message": "Image uploaded and saved successfully"
+            "filename": result.get("filename"),
+            "image_url": result.get("url", ""),
+            "message": "Image uploaded successfully"
         }
 
     except HTTPException:
