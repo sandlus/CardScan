@@ -1,0 +1,25 @@
+<?php
+
+header("Content-Type: application/json");
+
+// read JSON
+$data = json_decode(file_get_contents("php://input"), true);
+
+if (!$data) {
+    echo json_encode([
+        "status" => false,
+        "message" => "No data received"
+    ]);
+    exit;
+}
+
+// Example processing
+$response = [
+    "status" => true,
+    "message" => "Message received",
+    "data" => $data
+];
+
+// 👉 You can insert into DB here
+
+echo json_encode($response);
