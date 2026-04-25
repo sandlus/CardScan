@@ -257,6 +257,7 @@ from components.catalog import router as catalog_router
 from components.db import get_connection
 from components.tenant_config import TENANTS
 from components.tenant_resolver import get_tenant_by_slug, resolve_tenant_slug_from_request
+from components.business_card import router as business_card_router
 
 load_dotenv()
 
@@ -317,7 +318,7 @@ def clean_phone(val):
 
 
 app.include_router(catalog_router)
-
+app.include_router(business_card_router)
 
 @app.get("/api/health")
 def health():
