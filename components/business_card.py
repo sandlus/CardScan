@@ -1,7 +1,8 @@
+
 # import json
 # import os
 # import re
-# from typing import Any, Dict, List, Optional, Tuple
+# from typing import Any, Dict, List, Tuple
 
 # from fastapi import APIRouter, File, HTTPException, UploadFile
 # from google.cloud import vision
@@ -67,7 +68,7 @@
 #         except Exception as exc:
 #             raise HTTPException(
 #                 status_code=500,
-#                 detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}"
+#                 detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}",
 #             )
 
 #     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -76,7 +77,7 @@
 
 #     raise HTTPException(
 #         status_code=500,
-#         detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway."
+#         detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway.",
 #     )
 
 
@@ -126,7 +127,7 @@
 
 
 # def extract_websites(text: str) -> List[str]:
-#     websites = []
+#     websites: List[str] = []
 #     for item in WEBSITE_REGEX.findall(text or ""):
 #         cleaned = clean_line(item).rstrip(".,;")
 #         if cleaned and "@" not in cleaned:
@@ -273,7 +274,7 @@
 
 
 # def pick_name(lines: List[str], company: str, designation: str) -> str:
-#     for idx, line in enumerate(lines[:8]):
+#     for line in lines[:8]:
 #         if line in {company, designation}:
 #             continue
 #         if looks_like_person_name(line):
@@ -283,7 +284,7 @@
 #         company_index = next((i for i, l in enumerate(lines) if l == company), -1)
 #         if company_index != -1:
 #             for line in lines[company_index + 1: company_index + 4]:
-#                 if line not in {designation} and looks_like_person_name(line):
+#                 if line != designation and looks_like_person_name(line):
 #                     return line
 
 #     return ""
@@ -317,9 +318,16 @@
 #     gstin: str,
 # ) -> str:
 #     address_parts = [part.strip() for part in address.split(",") if part.strip()]
-#     skip_values = set(
-#         [company, designation, person_name, gstin, *address_parts, *phones, *emails, *websites]
-#     )
+#     skip_values = {
+#         company,
+#         designation,
+#         person_name,
+#         gstin,
+#         *address_parts,
+#         *phones,
+#         *emails,
+#         *websites,
+#     }
 
 #     notes: List[str] = []
 #     for line in lines:
@@ -457,6 +465,9 @@
 #     if not image_bytes:
 #         raise HTTPException(status_code=400, detail="Empty image file")
 
+#     if len(image_bytes) > 10 * 1024 * 1024:
+#         raise HTTPException(status_code=400, detail="Image size must be less than 10MB")
+
 #     raw_text = google_document_text_detection(image_bytes)
 #     parsed, lines = parse_text(raw_text)
 
@@ -484,12 +495,15 @@
 import json
 import os
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+import requests
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from google.cloud import vision
 from google.oauth2 import service_account
 from pydantic import BaseModel
+
+from components.tenant_resolver import get_tenant_by_slug, resolve_tenant_slug_from_request
 
 router = APIRouter()
 
@@ -550,16 +564,22 @@ def get_vision_client() -> vision.ImageAnnotatorClient:
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}",
+                detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}"
             )
 
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if credentials_path:
-        return vision.ImageAnnotatorClient()
+        try:
+            return vision.ImageAnnotatorClient()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize Google Vision client: {str(exc)}"
+            )
 
     raise HTTPException(
         status_code=500,
-        detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway.",
+        detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway."
     )
 
 
@@ -609,7 +629,7 @@ def extract_emails(text: str) -> List[str]:
 
 
 def extract_websites(text: str) -> List[str]:
-    websites: List[str] = []
+    websites = []
     for item in WEBSITE_REGEX.findall(text or ""):
         cleaned = clean_line(item).rstrip(".,;")
         if cleaned and "@" not in cleaned:
@@ -766,7 +786,7 @@ def pick_name(lines: List[str], company: str, designation: str) -> str:
         company_index = next((i for i, l in enumerate(lines) if l == company), -1)
         if company_index != -1:
             for line in lines[company_index + 1: company_index + 4]:
-                if line != designation and looks_like_person_name(line):
+                if line not in {designation} and looks_like_person_name(line):
                     return line
 
     return ""
@@ -800,16 +820,9 @@ def build_notes(
     gstin: str,
 ) -> str:
     address_parts = [part.strip() for part in address.split(",") if part.strip()]
-    skip_values = {
-        company,
-        designation,
-        person_name,
-        gstin,
-        *address_parts,
-        *phones,
-        *emails,
-        *websites,
-    }
+    skip_values = set(
+        [company, designation, person_name, gstin, *address_parts, *phones, *emails, *websites]
+    )
 
     notes: List[str] = []
     for line in lines:
@@ -938,8 +951,86 @@ def google_document_text_detection(image_bytes: bytes) -> str:
     return ""
 
 
+async def upload_image_to_tenant_php(
+    tenant: Any,
+    image: UploadFile,
+    source: Optional[str] = None,
+    timestamp: Optional[str] = None,
+    name: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
+    company: Optional[str] = None,
+) -> Dict[str, Any]:
+    php_upload_url = getattr(tenant, "php_upload_url", None) or os.getenv("PHP_UPLOAD_URL")
+
+    if not php_upload_url:
+        raise HTTPException(
+            status_code=500,
+            detail=f"php_upload_url is missing for tenant {tenant.slug}"
+        )
+
+    file_content = await image.read()
+    if not file_content:
+        raise HTTPException(status_code=400, detail="Empty image file")
+
+    files = {
+        "image": (
+            image.filename or "business-card.jpg",
+            file_content,
+            image.content_type or "image/jpeg",
+        )
+    }
+
+    data = {
+        "source": source or "business_card_scan",
+        "timestamp": timestamp or "",
+        "name": name or "",
+        "phone": phone or "",
+        "email": email or "",
+        "company": company or "",
+        "tenant": tenant.slug,
+    }
+
+    try:
+        response = requests.post(
+            php_upload_url,
+            files=files,
+            data=data,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=500, detail=f"PHP upload failed: {str(exc)}")
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PHP returned {response.status_code}: {response.text}"
+        )
+
+    try:
+        result = response.json()
+    except Exception:
+        raise HTTPException(status_code=500, detail=f"Invalid PHP response: {response.text}")
+
+    if not result.get("status"):
+        raise HTTPException(
+            status_code=500,
+            detail=result.get("message", "Image upload failed on PHP")
+        )
+
+    return {
+        "status": True,
+        "filename": result.get("filename") or result.get("image_name") or "",
+        "image_url": result.get("url") or result.get("image_url") or "",
+        "raw": result,
+        "file_content": file_content,
+    }
+
+
 @router.post("/business-card/scan")
-async def scan_business_card(file: UploadFile = File(...)):
+async def scan_business_card(
+    file: UploadFile = File(...),
+):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are allowed")
 
@@ -972,4 +1063,55 @@ def parse_business_card(data: BusinessCardText):
         "data": parsed,
         "selections": build_selections(parsed, lines),
         "rawText": data.text or "",
+    }
+
+
+@router.post("/business-card/scan-live")
+async def scan_business_card_live(
+    request: Request,
+    image: UploadFile = File(...),
+    source: Optional[str] = Form(default="business_card_scan"),
+    timestamp: Optional[str] = Form(default=None),
+    name: Optional[str] = Form(default=None),
+    phone: Optional[str] = Form(default=None),
+    email: Optional[str] = Form(default=None),
+    company: Optional[str] = Form(default=None),
+    tenant_slug: str = Depends(resolve_tenant_slug_from_request),
+):
+    if not image.content_type or not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    tenant = get_tenant_by_slug(tenant_slug)
+
+    uploaded = await upload_image_to_tenant_php(
+        tenant=tenant,
+        image=image,
+        source=source,
+        timestamp=timestamp,
+        name=name,
+        phone=phone,
+        email=email,
+        company=company,
+    )
+
+    image_bytes = uploaded["file_content"]
+
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image size must be less than 10MB")
+
+    raw_text = google_document_text_detection(image_bytes)
+    parsed, lines = parse_text(raw_text)
+
+    parsed["image_name"] = uploaded["filename"]
+    parsed["image_url"] = uploaded["image_url"]
+
+    return {
+        "status": True,
+        "tenant": tenant.slug,
+        "message": "Business card scanned successfully",
+        "data": parsed,
+        "selections": build_selections(parsed, lines),
+        "rawText": raw_text,
+        "image_name": uploaded["filename"],
+        "image_url": uploaded["image_url"],
     }
