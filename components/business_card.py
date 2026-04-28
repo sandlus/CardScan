@@ -953,30 +953,30 @@ def looks_like_person_name(line: str) -> bool:
     if any(word in lowered for word in NAME_BLOCKLIST):
         return False
 
-    # Reject single-word brand names like Daawat, Residency, Palace, Hotel
-    words_raw = [w for w in re.split(r"\s+", line.strip()) if w]
-    if len(words_raw) == 1:
+    # ✅ IMPORTANT:
+    # If line has subject/designation in brackets like:
+    # V.K. Agarwal(maths)
+    # do NOT treat it as person name.
+    # This prevents wrong auto-fill.
+    if re.search(r"\([^)]*\)", line):
         return False
 
-    # Remove bracket subject, e.g. V.K. Agarwal(maths) -> V.K. Agarwal
-    line_without_subject = re.sub(r"\([^)]*\)", "", line).strip()
+    words = [w for w in re.split(r"\s+", line.strip()) if w]
 
-    if re.search(r"\d", line_without_subject):
-        return False
-
-    words = [w for w in re.split(r"\s+", line_without_subject) if w]
-
+    # Reject single-word brands like Daawat
     if not 2 <= len(words) <= 4:
         return False
 
-    if INITIAL_NAME_REGEX.match(line_without_subject):
+    if re.search(r"\d", line):
+        return False
+
+    if INITIAL_NAME_REGEX.match(line):
         return True
 
-    if FULL_NAME_REGEX.match(line_without_subject):
+    if FULL_NAME_REGEX.match(line):
         return True
 
     return False
-
 
 def score_company_candidate(line: str, index: int) -> int:
     line = clean_line(line)
@@ -1073,8 +1073,14 @@ def pick_designation(lines: List[str], company: str) -> str:
     for line in lines:
         if line == company:
             continue
+
+        # Do not use name-like bracket lines as designation
+        if re.search(r"\([^)]*\)", line):
+            continue
+
         if is_probable_designation(line):
             return line
+
     return ""
 
 
