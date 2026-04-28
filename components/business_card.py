@@ -887,6 +887,49 @@ def is_noise_line(line: str) -> bool:
     return False
 
 
+# def looks_like_person_name(line: str) -> bool:
+#     line = clean_line(line)
+
+#     if not line:
+#         return False
+
+#     lowered = line.lower()
+
+#     if is_noise_line(line):
+#         return False
+
+#     if re.search(r"\d", line):
+#         return False
+
+#     if looks_like_email(line) or looks_like_website(line) or looks_like_phone(line):
+#         return False
+
+#     if is_probable_address(line):
+#         return False
+
+#     if has_company_hint(line):
+#         return False
+
+#     if any(word in lowered for word in NAME_BLOCKLIST):
+#         return False
+
+#     line_without_prefix = NAME_PREFIX_REGEX.sub("", line).strip()
+#     words = [w for w in re.split(r"\s+", line_without_prefix) if w]
+
+#     if not 1 <= len(words) <= 4:
+#         return False
+
+#     if not any(re.search(r"[A-Za-z]", word) for word in words):
+#         return False
+
+#     if INITIAL_NAME_REGEX.match(line_without_prefix):
+#         return True
+
+#     if FULL_NAME_REGEX.match(line_without_prefix):
+#         return True
+
+#     return False 
+
 def looks_like_person_name(line: str) -> bool:
     line = clean_line(line)
 
@@ -896,9 +939,6 @@ def looks_like_person_name(line: str) -> bool:
     lowered = line.lower()
 
     if is_noise_line(line):
-        return False
-
-    if re.search(r"\d", line):
         return False
 
     if looks_like_email(line) or looks_like_website(line) or looks_like_phone(line):
@@ -913,19 +953,26 @@ def looks_like_person_name(line: str) -> bool:
     if any(word in lowered for word in NAME_BLOCKLIST):
         return False
 
-    line_without_prefix = NAME_PREFIX_REGEX.sub("", line).strip()
-    words = [w for w in re.split(r"\s+", line_without_prefix) if w]
-
-    if not 1 <= len(words) <= 4:
+    # Reject single-word brand names like Daawat, Residency, Palace, Hotel
+    words_raw = [w for w in re.split(r"\s+", line.strip()) if w]
+    if len(words_raw) == 1:
         return False
 
-    if not any(re.search(r"[A-Za-z]", word) for word in words):
+    # Remove bracket subject, e.g. V.K. Agarwal(maths) -> V.K. Agarwal
+    line_without_subject = re.sub(r"\([^)]*\)", "", line).strip()
+
+    if re.search(r"\d", line_without_subject):
         return False
 
-    if INITIAL_NAME_REGEX.match(line_without_prefix):
+    words = [w for w in re.split(r"\s+", line_without_subject) if w]
+
+    if not 2 <= len(words) <= 4:
+        return False
+
+    if INITIAL_NAME_REGEX.match(line_without_subject):
         return True
 
-    if FULL_NAME_REGEX.match(line_without_prefix):
+    if FULL_NAME_REGEX.match(line_without_subject):
         return True
 
     return False
@@ -1031,15 +1078,27 @@ def pick_designation(lines: List[str], company: str) -> str:
     return ""
 
 
-def pick_name(lines: List[str], company: str, designation: str) -> str:
-    top_lines = lines[:10]
+# def pick_name(lines: List[str], company: str, designation: str) -> str:
+#     top_lines = lines[:10]
 
-    for line in top_lines:
+#     for line in top_lines:
+#         if line in {company, designation}:
+#             continue
+
+#         if looks_like_person_name(line):
+#             return line
+
+#     return "" 
+def pick_name(lines: List[str], company: str, designation: str) -> str:
+    for line in lines[:10]:
         if line in {company, designation}:
             continue
 
         if looks_like_person_name(line):
-            return line
+            # remove subject/designation inside brackets
+            clean_name = re.sub(r"\([^)]*\)", "", line).strip()
+            clean_name = clean_line(clean_name)
+            return clean_name
 
     return ""
 
