@@ -2,12 +2,15 @@
 # import json
 # import os
 # import re
-# from typing import Any, Dict, List, Tuple
+# from typing import Any, Dict, List, Optional, Tuple
 
-# from fastapi import APIRouter, File, HTTPException, UploadFile
+# import requests
+# from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 # from google.cloud import vision
 # from google.oauth2 import service_account
 # from pydantic import BaseModel
+
+# from components.tenant_resolver import get_tenant_by_slug, resolve_tenant_slug_from_request
 
 # router = APIRouter()
 
@@ -68,16 +71,22 @@
 #         except Exception as exc:
 #             raise HTTPException(
 #                 status_code=500,
-#                 detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}",
+#                 detail=f"Invalid GOOGLE_VISION_CREDENTIALS_JSON: {str(exc)}"
 #             )
 
 #     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 #     if credentials_path:
-#         return vision.ImageAnnotatorClient()
+#         try:
+#             return vision.ImageAnnotatorClient()
+#         except Exception as exc:
+#             raise HTTPException(
+#                 status_code=500,
+#                 detail=f"Failed to initialize Google Vision client: {str(exc)}"
+#             )
 
 #     raise HTTPException(
 #         status_code=500,
-#         detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway.",
+#         detail="Google Vision credentials not configured. Set GOOGLE_VISION_CREDENTIALS_JSON in Railway."
 #     )
 
 
@@ -127,7 +136,7 @@
 
 
 # def extract_websites(text: str) -> List[str]:
-#     websites: List[str] = []
+#     websites = []
 #     for item in WEBSITE_REGEX.findall(text or ""):
 #         cleaned = clean_line(item).rstrip(".,;")
 #         if cleaned and "@" not in cleaned:
@@ -284,7 +293,7 @@
 #         company_index = next((i for i, l in enumerate(lines) if l == company), -1)
 #         if company_index != -1:
 #             for line in lines[company_index + 1: company_index + 4]:
-#                 if line != designation and looks_like_person_name(line):
+#                 if line not in {designation} and looks_like_person_name(line):
 #                     return line
 
 #     return ""
@@ -318,16 +327,9 @@
 #     gstin: str,
 # ) -> str:
 #     address_parts = [part.strip() for part in address.split(",") if part.strip()]
-#     skip_values = {
-#         company,
-#         designation,
-#         person_name,
-#         gstin,
-#         *address_parts,
-#         *phones,
-#         *emails,
-#         *websites,
-#     }
+#     skip_values = set(
+#         [company, designation, person_name, gstin, *address_parts, *phones, *emails, *websites]
+#     )
 
 #     notes: List[str] = []
 #     for line in lines:
@@ -456,8 +458,86 @@
 #     return ""
 
 
+# async def upload_image_to_tenant_php(
+#     tenant: Any,
+#     image: UploadFile,
+#     source: Optional[str] = None,
+#     timestamp: Optional[str] = None,
+#     name: Optional[str] = None,
+#     phone: Optional[str] = None,
+#     email: Optional[str] = None,
+#     company: Optional[str] = None,
+# ) -> Dict[str, Any]:
+#     php_upload_url = getattr(tenant, "php_upload_url", None) or os.getenv("PHP_UPLOAD_URL")
+
+#     if not php_upload_url:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"php_upload_url is missing for tenant {tenant.slug}"
+#         )
+
+#     file_content = await image.read()
+#     if not file_content:
+#         raise HTTPException(status_code=400, detail="Empty image file")
+
+#     files = {
+#         "image": (
+#             image.filename or "business-card.jpg",
+#             file_content,
+#             image.content_type or "image/jpeg",
+#         )
+#     }
+
+#     data = {
+#         "source": source or "business_card_scan",
+#         "timestamp": timestamp or "",
+#         "name": name or "",
+#         "phone": phone or "",
+#         "email": email or "",
+#         "company": company or "",
+#         "tenant": tenant.slug,
+#     }
+
+#     try:
+#         response = requests.post(
+#             php_upload_url,
+#             files=files,
+#             data=data,
+#             timeout=30,
+#         )
+#     except requests.RequestException as exc:
+#         raise HTTPException(status_code=500, detail=f"PHP upload failed: {str(exc)}")
+
+#     if response.status_code != 200:
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"PHP returned {response.status_code}: {response.text}"
+#         )
+
+#     try:
+#         result = response.json()
+#     except Exception:
+#         raise HTTPException(status_code=500, detail=f"Invalid PHP response: {response.text}")
+
+#     if not result.get("status"):
+#         raise HTTPException(
+#             status_code=500,
+#             detail=result.get("message", "Image upload failed on PHP")
+#         )
+
+#     return {
+#         "status": True,
+#         "filename": result.get("filename") or result.get("image_name") or "",
+#         "image_url": result.get("url") or result.get("image_url") or "",
+#         "raw": result,
+#         "file_content": file_content,
+#     }
+
+
 # @router.post("/business-card/scan")
-# async def scan_business_card(file: UploadFile = File(...)):
+# async def scan_business_card(
+#     file: UploadFile = File(...),
+# ):
 #     if not file.content_type or not file.content_type.startswith("image/"):
 #         raise HTTPException(status_code=400, detail="Only image files are allowed")
 
@@ -490,6 +570,57 @@
 #         "data": parsed,
 #         "selections": build_selections(parsed, lines),
 #         "rawText": data.text or "",
+#     }
+
+
+# @router.post("/business-card/scan-live")
+# async def scan_business_card_live(
+#     request: Request,
+#     image: UploadFile = File(...),
+#     source: Optional[str] = Form(default="business_card_scan"),
+#     timestamp: Optional[str] = Form(default=None),
+#     name: Optional[str] = Form(default=None),
+#     phone: Optional[str] = Form(default=None),
+#     email: Optional[str] = Form(default=None),
+#     company: Optional[str] = Form(default=None),
+#     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
+# ):
+#     if not image.content_type or not image.content_type.startswith("image/"):
+#         raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+#     tenant = get_tenant_by_slug(tenant_slug)
+
+#     uploaded = await upload_image_to_tenant_php(
+#         tenant=tenant,
+#         image=image,
+#         source=source,
+#         timestamp=timestamp,
+#         name=name,
+#         phone=phone,
+#         email=email,
+#         company=company,
+#     )
+
+#     image_bytes = uploaded["file_content"]
+
+#     if len(image_bytes) > 10 * 1024 * 1024:
+#         raise HTTPException(status_code=400, detail="Image size must be less than 10MB")
+
+#     raw_text = google_document_text_detection(image_bytes)
+#     parsed, lines = parse_text(raw_text)
+
+#     parsed["image_name"] = uploaded["filename"]
+#     parsed["image_url"] = uploaded["image_url"]
+
+#     return {
+#         "status": True,
+#         "tenant": tenant.slug,
+#         "message": "Business card scanned successfully",
+#         "data": parsed,
+#         "selections": build_selections(parsed, lines),
+#         "rawText": raw_text,
+#         "image_name": uploaded["filename"],
+#         "image_url": uploaded["image_url"],
 #     } 
 
 import json
@@ -517,7 +648,7 @@ WEBSITE_REGEX = re.compile(
     r"(?:https?://)?(?:www\.)?[A-Za-z0-9][A-Za-z0-9.-]+\.(?:com|in|co|net|org|io|biz|info|me|tech|ai)(?:/[^\s]*)?",
     re.I,
 )
-PHONE_BLOCK_REGEX = re.compile(r"(?:\+?\d[\d\s()./-]{7,}\d)")
+PHONE_BLOCK_REGEX = re.compile(r"(?:\+?\d[\d\s()./-]{6,}\d)")
 GSTIN_REGEX = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b", re.I)
 
 DESIGNATION_WORDS = [
@@ -525,7 +656,8 @@ DESIGNATION_WORDS = [
     "proprietor", "partner", "founder", "co-founder", "ceo", "cto", "cfo",
     "md", "designer", "engineer", "consultant", "head", "lead", "developer",
     "accountant", "chairman", "president", "admin", "hr", "officer", "agent",
-    "specialist", "advisor", "architect", "analyst", "secretary"
+    "specialist", "advisor", "architect", "analyst", "secretary", "maths",
+    "principal", "teacher", "faculty",
 ]
 
 ADDRESS_WORDS = [
@@ -534,7 +666,8 @@ ADDRESS_WORDS = [
     "sector", "colony", "shop", "plot", "gali", "lane", "marg", "industrial",
     "estate", "area", "tower", "building", "complex", "plaza", "suite", "city",
     "district", "state", "india", "agra", "delhi", "mumbai", "jaipur", "noida",
-    "gurgaon", "bangalore", "hyderabad", "pincode", "pin code"
+    "gurgaon", "bangalore", "hyderabad", "pincode", "pin code", "mandi",
+    "fatehabad", "tajganj", "college", "chauraha", "branch", "centre",
 ]
 
 COMPANY_HINTS = [
@@ -542,14 +675,33 @@ COMPANY_HINTS = [
     "company", "co.", "enterprises", "enterprise", "solutions", "technology",
     "technologies", "tech", "traders", "industries", "exports", "imports",
     "group", "studio", "agency", "associates", "systems", "services", "fashion",
-    "textiles", "digital", "software", "consultancy", "pharma", "labs"
+    "textiles", "digital", "software", "consultancy", "pharma", "labs",
+    "hotel", "residency", "palace", "restaurant", "resort", "inn", "guest house",
+    "coaching", "centre", "center", "classes", "academy", "school", "institute",
+    "college", "tutorial", "education", "clinic", "hospital", "store", "mart",
+    "jewellers", "jewelers", "sweets", "bakery", "foods", "motors", "travels",
 ]
+
+NAME_PREFIX_REGEX = re.compile(
+    r"^(?:mr|mrs|ms|miss|dr|prof|shri|smt)\.?\s+",
+    re.I,
+)
+
+INITIAL_NAME_REGEX = re.compile(
+    r"^(?:[A-Z]\.?\s*){1,4}[A-Z][A-Za-z]+(?:\s*\([A-Za-z]+\))?$"
+)
+
+FULL_NAME_REGEX = re.compile(
+    r"^[A-Z][A-Za-z.]{1,20}(?:\s+[A-Z][A-Za-z.]{1,25}){0,3}(?:\s*\([A-Za-z]+\))?$"
+)
 
 NAME_BLOCKLIST = [
     "pvt", "ltd", "limited", "llp", "enterprise", "enterprises", "solutions",
     "technologies", "technology", "road", "street", "nagar", "market", "office",
     "floor", "gali", "chowk", "sector", "address", "gstin", "india", "website",
-    "www", "email", "mobile", "phone", "tel", "contact"
+    "www", "email", "e-mail", "mobile", "phone", "tel", "contact", "hotel",
+    "residency", "palace", "coaching", "centre", "center", "academy", "school",
+    "institute", "college", "branch", "near", "opp", "opposite", "director",
 ]
 
 
@@ -613,13 +765,28 @@ def digits_only(value: str) -> str:
 def normalize_phone(value: str) -> str:
     digits = digits_only(value)
 
-    if len(digits) > 10 and digits.startswith("91"):
-        digits = digits[-10:]
-    elif len(digits) > 10:
-        digits = digits[-10:]
+    if not digits:
+        return ""
+
+    if digits.startswith("91") and len(digits) == 12:
+        return digits[-10:]
 
     if len(digits) == 10 and digits[0] in "6789":
         return digits
+
+    if len(digits) == 10 and digits.startswith("0562"):
+        return digits
+
+    if len(digits) == 11 and digits.startswith("0"):
+        return digits
+
+    if 8 <= len(digits) <= 11 and not digits.startswith("91"):
+        return digits
+
+    if len(digits) > 11:
+        last_10 = digits[-10:]
+        if last_10[0] in "6789":
+            return last_10
 
     return ""
 
@@ -639,10 +806,12 @@ def extract_websites(text: str) -> List[str]:
 
 def extract_phones(text: str) -> List[str]:
     phones: List[str] = []
+
     for candidate in PHONE_BLOCK_REGEX.findall(text or ""):
         phone = normalize_phone(candidate)
         if phone and phone not in phones:
             phones.append(phone)
+
     return phones
 
 
@@ -663,19 +832,33 @@ def looks_like_website(line: str) -> bool:
     return bool(WEBSITE_REGEX.search(line or ""))
 
 
+def has_company_hint(line: str) -> bool:
+    lowered = (line or "").lower()
+    return any(word in lowered for word in COMPANY_HINTS)
+
+
 def is_probable_address(line: str) -> bool:
     lowered = (line or "").lower()
+
+    if looks_like_email(line) or looks_like_website(line):
+        return False
+
     if any(word in lowered for word in ADDRESS_WORDS):
         return True
+
     if re.search(r"\b\d{6}\b", line or ""):
         return True
+
     if "," in line and any(ch.isdigit() for ch in line):
         return True
+
     return False
 
 
 def is_probable_designation(line: str) -> bool:
     lowered = (line or "").lower()
+    if has_company_hint(line):
+        return False
     return any(word in lowered for word in DESIGNATION_WORDS)
 
 
@@ -684,65 +867,115 @@ def is_all_caps_like(line: str) -> bool:
     return bool(letters) and letters.isupper()
 
 
-def looks_like_person_name(line: str) -> bool:
-    if not line:
-        return False
-    if re.search(r"\d", line):
-        return False
-    if looks_like_email(line) or looks_like_website(line):
-        return False
+def is_noise_line(line: str) -> bool:
+    lowered = (line or "").lower().strip()
 
-    words = [w for w in re.split(r"\s+", line.strip()) if w]
-    if not 1 <= len(words) <= 4:
+    if not lowered:
+        return True
+
+    noise_words = [
+        "email", "e-mail", "mail", "phone", "tel", "mobile", "contact",
+        "website", "web", "www", "fax",
+    ]
+
+    if lowered in noise_words:
+        return True
+
+    if lowered.startswith("email") or lowered.startswith("e-mail"):
+        return True
+
+    return False
+
+
+def looks_like_person_name(line: str) -> bool:
+    line = clean_line(line)
+
+    if not line:
         return False
 
     lowered = line.lower()
+
+    if is_noise_line(line):
+        return False
+
+    if re.search(r"\d", line):
+        return False
+
+    if looks_like_email(line) or looks_like_website(line) or looks_like_phone(line):
+        return False
+
+    if is_probable_address(line):
+        return False
+
+    if has_company_hint(line):
+        return False
+
     if any(word in lowered for word in NAME_BLOCKLIST):
         return False
 
-    alpha_words = [w for w in words if re.search(r"[A-Za-z]", w)]
-    if not alpha_words:
+    line_without_prefix = NAME_PREFIX_REGEX.sub("", line).strip()
+    words = [w for w in re.split(r"\s+", line_without_prefix) if w]
+
+    if not 1 <= len(words) <= 4:
         return False
 
-    title_like = 0
-    for word in alpha_words:
-        pure = re.sub(r"[^A-Za-z]", "", word)
-        if pure and (pure[0].isupper() or pure.isupper()):
-            title_like += 1
+    if not any(re.search(r"[A-Za-z]", word) for word in words):
+        return False
 
-    return title_like >= max(1, len(alpha_words) - 1)
+    if INITIAL_NAME_REGEX.match(line_without_prefix):
+        return True
+
+    if FULL_NAME_REGEX.match(line_without_prefix):
+        return True
+
+    return False
 
 
 def score_company_candidate(line: str, index: int) -> int:
+    line = clean_line(line)
     lowered = line.lower()
-    score = 0
 
     if not line:
+        return -100
+
+    if is_noise_line(line):
         return -100
 
     if looks_like_email(line) or looks_like_phone(line) or looks_like_website(line):
         return -100
 
-    if is_probable_address(line):
-        score -= 5
+    if extract_gstin(line):
+        return -100
 
-    if any(word in lowered for word in COMPANY_HINTS):
-        score += 8
+    score = 0
+
+    if has_company_hint(line):
+        score += 15
 
     if len(line.split()) >= 2:
-        score += 2
+        score += 4
+
+    if len(line) >= 10:
+        score += 3
 
     if is_all_caps_like(line):
-        score += 3
+        score += 2
 
-    if index <= 2:
-        score += 3
+    if index <= 5:
+        score += 5
+
+    if is_probable_address(line):
+        score -= 8
 
     if looks_like_person_name(line):
-        score -= 3
+        score -= 10
 
     if is_probable_designation(line):
-        score -= 2
+        score -= 8
+
+    address_markers = ["near", "opp", "opposite", "road", "branch", "block", "mandi"]
+    if any(word in lowered for word in address_markers):
+        score -= 8
 
     return score
 
@@ -753,16 +986,39 @@ def split_lines(raw_text: str) -> List[str]:
     return [line for line in cleaned if line]
 
 
+def merge_likely_company_lines(lines: List[str]) -> List[str]:
+    merged = list(lines)
+
+    for i in range(len(lines) - 1):
+        first = clean_line(lines[i])
+        second = clean_line(lines[i + 1])
+
+        if not first or not second:
+            continue
+
+        combined = f"{first} {second}"
+
+        if has_company_hint(combined) and not is_probable_address(combined):
+            if combined not in merged:
+                merged.append(combined)
+
+    return merged
+
+
 def pick_company(lines: List[str]) -> str:
     candidates: List[Tuple[int, str]] = []
 
-    for idx, line in enumerate(lines[:10]):
+    company_lines = merge_likely_company_lines(lines[:12])
+
+    for idx, line in enumerate(company_lines):
         score = score_company_candidate(line, idx)
         candidates.append((score, line))
 
     candidates.sort(key=lambda x: x[0], reverse=True)
+
     if candidates and candidates[0][0] > 0:
         return candidates[0][1]
+
     return ""
 
 
@@ -776,18 +1032,14 @@ def pick_designation(lines: List[str], company: str) -> str:
 
 
 def pick_name(lines: List[str], company: str, designation: str) -> str:
-    for line in lines[:8]:
+    top_lines = lines[:10]
+
+    for line in top_lines:
         if line in {company, designation}:
             continue
+
         if looks_like_person_name(line):
             return line
-
-    if company:
-        company_index = next((i for i, l in enumerate(lines) if l == company), -1)
-        if company_index != -1:
-            for line in lines[company_index + 1: company_index + 4]:
-                if line not in {designation} and looks_like_person_name(line):
-                    return line
 
     return ""
 
@@ -798,10 +1050,16 @@ def group_address(lines: List[str], company: str, designation: str, person_name:
     for line in lines:
         if line in {company, designation, person_name}:
             continue
+
         if looks_like_email(line) or looks_like_phone(line) or looks_like_website(line):
             continue
+
         if extract_gstin(line):
             continue
+
+        if has_company_hint(line) and not is_probable_address(line):
+            continue
+
         if is_probable_address(line):
             address_lines.append(line)
 
@@ -825,15 +1083,26 @@ def build_notes(
     )
 
     notes: List[str] = []
+
     for line in lines:
         if line in skip_values:
             continue
+
+        if is_noise_line(line):
+            continue
+
         if looks_like_email(line) or looks_like_phone(line) or looks_like_website(line):
             continue
+
         if extract_gstin(line):
             continue
+
         if is_probable_address(line):
             continue
+
+        if line == company or line == person_name or line == designation:
+            continue
+
         notes.append(line)
 
     return " | ".join(unique_list(notes))
@@ -852,6 +1121,7 @@ def parse_text(raw_text: str) -> Tuple[Dict[str, Any], List[str]]:
     designation = pick_designation(lines, company)
     person_name = pick_name(lines, company, designation)
     address = group_address(lines, company, designation, person_name)
+
     notes = build_notes(
         lines=lines,
         company=company,
