@@ -1195,22 +1195,9 @@ SORTED_PHONE_COUNTRIES = sorted(
 )
 
 PHONE_LABEL_REGEX = re.compile(
-    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact|direct|dir|handphone|hp)\s*[:：-]?\s*(.+)",
+    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact)\s*[:：-]?\s*(.+)",
     re.I,
 )
-PHONE_CONTEXT_REGEX = re.compile(
-    r"\b(?:mobile|mob|cell|tel|telephone|phone|direct|dir|office|whatsapp|wa|contact|handphone|hp)\b",
-    re.I,
-)
-ADDRESS_PHONE_CONTEXT_REGEX = re.compile(
-    r"\b(?:address|add|office|suite|tower|building|floor|road|street|st\.?|ave|avenue|blvd|district|city|state|china|india|usa|kuwait|israel|new york|california)\b",
-    re.I,
-)
-MOBILE_PRIORITY_REGEX = re.compile(
-    r"\b(?:mobile|mob|cell|whatsapp|wa|handphone|hp|direct|dir)\b",
-    re.I,
-)
-OFFICE_PRIORITY_REGEX = re.compile(r"\boffice\b", re.I)
 
 
 def get_fallback_country(digits: str) -> Dict[str, str]:
@@ -1224,6 +1211,8 @@ def get_fallback_country(digits: str) -> Dict[str, str]:
 def reject_false_phone(raw: str) -> bool:
     value = raw or ""
     lowered = value.lower()
+
+    # Reject prices, dimensions and decimals like 92.50, $3.85, 20x32.
     if "$" in value or "₹" in value or "€" in value or "£" in value:
         return True
     if re.search(r"\b\d+\s*[x×]\s*\d+\b", lowered):
@@ -1279,6 +1268,7 @@ def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, 
     country = ""
     dial_code = ""
 
+    # International number: remove exact country code only, never guess from random digits.
     if "+" in raw:
         match = get_fallback_country(digits)
         if not match:
@@ -1286,14 +1276,18 @@ def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, 
         country = match["country"]
         dial_code = match["dialCode"]
         digits = digits[len(dial_code.replace("+", "")):]
+
     elif fallback_country:
         country = fallback_country
         match = next((item for item in PHONE_COUNTRIES if item["country"] == fallback_country), None)
         dial_code = match["dialCode"] if match else ""
+
     elif len(digits) == 10 and digits[0] in "6789":
         country = "IN"
         dial_code = "+91"
+
     else:
+        # Do not treat random amounts/measurements as phone numbers.
         return {"number": "", "country": "", "dialCode": "", "raw": raw}
 
     if not (6 <= len(digits) <= 15):
@@ -1307,7 +1301,7 @@ def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, 
     }
 
 
-def add_phone(phones: List[Dict[str, Any]], seen: set, phone: Dict[str, Any]) -> None:
+def add_phone(phones: List[Dict[str, str]], seen: set, phone: Dict[str, str]) -> None:
     number = phone.get("number", "")
     if not number:
         return
@@ -1317,29 +1311,32 @@ def add_phone(phones: List[Dict[str, Any]], seen: set, phone: Dict[str, Any]) ->
         phones.append(phone)
 
 
-def phone_priority(line: str, candidate: str, phone: Dict[str, str], order: int) -> int:
-    score = 0
-    lowered = (line or "").lower()
-    raw = (candidate or "").strip()
-    digits = phone.get("number", "")
-    raw_digits = digits_only(raw)
+def split_compound_phone_candidate(candidate: str) -> List[str]:
+    raw = clean_line(candidate or "")
+    if not raw:
+        return []
 
-    if MOBILE_PRIORITY_REGEX.search(lowered):
-        score += 120
-    if OFFICE_PRIORITY_REGEX.search(lowered):
-        score += 70
-    if PHONE_CONTEXT_REGEX.search(lowered):
-        score += 45
-    if raw.strip().startswith("+"):
-        score += 35
-    if len(digits) >= 8:
-        score += 10
-    if ADDRESS_PHONE_CONTEXT_REGEX.search(lowered):
-        score -= 12
-    if re.search(r"\b(?:fax|gst|tax|zip|pin|pincode)\b", lowered):
-        score -= 100
-    score -= order
-    return score
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    match = re.match(r"^(\+\d{1,4})\s+(\d{6,15})\s*[-–—/]\s*(\d{4,15})$", normalized)
+    if match:
+        dial, first, second = match.groups()
+        return [f"{dial} {first}", f"{dial} {second}"]
+
+    parts = re.split(r"\s*[-–—/]\s*", normalized)
+    if len(parts) >= 2 and normalized.startswith("+"):
+        first = parts[0]
+        dial_match = re.match(r"^(\+\d{1,4})\s*(\d{6,15})$", first)
+        if dial_match:
+            dial = dial_match.group(1)
+            output = [first]
+            for part in parts[1:]:
+                only_digits = digits_only(part)
+                if 6 <= len(only_digits) <= 12:
+                    output.append(f"{dial} {only_digits}")
+            if len(output) > 1:
+                return output
+
+    return [normalized]
 
 
 def extract_phone_details(text: str) -> List[Dict[str, str]]:
@@ -1361,29 +1358,31 @@ def extract_phone_details(text: str) -> List[Dict[str, str]]:
                 matches = []
             for match in matches:
                 raw = match.raw_string
-                phone = phone_detail_from_phonenumbers(raw, default_region=last_country or "IN")
-                if not phone.get("number"):
-                    continue
-                if phone.get("country"):
-                    last_country = phone["country"]
-                phone["priority"] = phone_priority(line, raw, phone, order)
-                phone["sourceLine"] = line
-                add_phone(phones, seen, phone)
-                order += 1
+                for piece in split_compound_phone_candidate(raw):
+                    phone = phone_detail_from_phonenumbers(piece, default_region=last_country or "IN")
+                    if not phone.get("number"):
+                        continue
+                    if phone.get("country"):
+                        last_country = phone["country"]
+                    phone["priority"] = phone_priority(line, piece, phone, order)
+                    phone["sourceLine"] = line
+                    add_phone(phones, seen, phone)
+                    order += 1
 
         for candidate in candidates:
             has_plus = "+" in candidate
             if not has_plus and not line_has_phone_label:
                 continue
-            phone = normalize_phone_detail(candidate, fallback_country=last_country if not has_plus else "")
-            if not phone.get("number"):
-                continue
-            if phone.get("country"):
-                last_country = phone["country"]
-            phone["priority"] = phone_priority(line, candidate, phone, order)
-            phone["sourceLine"] = line
-            add_phone(phones, seen, phone)
-            order += 1
+            for piece in split_compound_phone_candidate(candidate):
+                phone = normalize_phone_detail(piece, fallback_country=last_country if "+" not in piece else "")
+                if not phone.get("number"):
+                    continue
+                if phone.get("country"):
+                    last_country = phone["country"]
+                phone["priority"] = phone_priority(line, piece, phone, order)
+                phone["sourceLine"] = line
+                add_phone(phones, seen, phone)
+                order += 1
 
     phones.sort(key=lambda item: item.get("priority", 0), reverse=True)
     return [{k: v for k, v in item.items() if k in {"number", "country", "dialCode", "raw"}} for item in phones[:2]]
@@ -1419,7 +1418,14 @@ def looks_like_email(line: str) -> bool:
 
 
 def looks_like_phone(line: str) -> bool:
-    return bool(normalize_phone(line))
+    value = clean_line(line or "")
+    if not value:
+        return False
+    if normalize_phone(value):
+        return True
+    if PHONE_CONTEXT_REGEX.search(value) and PHONE_BLOCK_REGEX.search(value):
+        return True
+    return False
 
 
 def looks_like_website(line: str) -> bool:
@@ -1452,6 +1458,8 @@ def is_probable_address(line: str) -> bool:
 def is_probable_designation(line: str) -> bool:
     lowered = (line or "").lower()
     if has_company_hint(line):
+        return False
+    if looks_like_phone(line) or PHONE_BLOCK_REGEX.search(line or ""):
         return False
     return any(word in lowered for word in DESIGNATION_WORDS)
 
