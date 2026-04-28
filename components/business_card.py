@@ -137,33 +137,109 @@
 #     return re.sub(r"\D", "", value or "")
 
 
+# PHONE_COUNTRIES = [
+#     {"country": "IN", "dialCode": "+91"},
+#     {"country": "US", "dialCode": "+1"},
+#     {"country": "CN", "dialCode": "+86"},
+#     {"country": "KW", "dialCode": "+965"},
+#     {"country": "GB", "dialCode": "+44"},
+#     {"country": "AE", "dialCode": "+971"},
+#     {"country": "SG", "dialCode": "+65"},
+#     {"country": "AU", "dialCode": "+61"},
+#     {"country": "CA", "dialCode": "+1"},
+#     {"country": "SA", "dialCode": "+966"},
+#     {"country": "QA", "dialCode": "+974"},
+#     {"country": "OM", "dialCode": "+968"},
+#     {"country": "BH", "dialCode": "+973"},
+#     {"country": "DE", "dialCode": "+49"},
+#     {"country": "FR", "dialCode": "+33"},
+#     {"country": "IT", "dialCode": "+39"},
+#     {"country": "ES", "dialCode": "+34"},
+#     {"country": "NL", "dialCode": "+31"},
+#     {"country": "TR", "dialCode": "+90"},
+#     {"country": "TH", "dialCode": "+66"},
+#     {"country": "MY", "dialCode": "+60"},
+#     {"country": "JP", "dialCode": "+81"},
+#     {"country": "KR", "dialCode": "+82"},
+#     {"country": "HK", "dialCode": "+852"},
+# ]
+
+# SORTED_PHONE_COUNTRIES = sorted(
+#     PHONE_COUNTRIES,
+#     key=lambda item: len(item["dialCode"].replace("+", "")),
+#     reverse=True,
+# )
+
+
+# def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, str]:
+#     raw = clean_line(value or "")
+#     raw = re.sub(r"(?:ext\.?|extension|x)\s*\d+$", "", raw, flags=re.I)
+#     digits = digits_only(raw)
+
+#     if not digits or len(digits) < 6:
+#         return {"number": "", "country": "", "dialCode": "", "raw": raw}
+
+#     country = ""
+#     dial_code = ""
+
+#     if "+" in raw or len(digits) > 10:
+#         for item in SORTED_PHONE_COUNTRIES:
+#             code_digits = item["dialCode"].replace("+", "")
+#             if digits.startswith(code_digits):
+#                 country = item["country"]
+#                 dial_code = item["dialCode"]
+#                 digits = digits[len(code_digits):]
+#                 break
+
+#     if not country and fallback_country:
+#         country = fallback_country
+#         match = next((item for item in PHONE_COUNTRIES if item["country"] == fallback_country), None)
+#         dial_code = match["dialCode"] if match else ""
+
+#     # For plain Indian mobile numbers without +91, keep existing India behavior.
+#     if not country and len(digits) == 10 and digits[0] in "6789":
+#         country = "IN"
+#         dial_code = "+91"
+
+#     # Preserve landline/local numbers instead of forcing them into 10-digit mobile format.
+#     if len(digits) > 15:
+#         digits = digits[-15:]
+
+#     if len(digits) < 6:
+#         return {"number": "", "country": "", "dialCode": "", "raw": raw}
+
+#     return {
+#         "number": digits,
+#         "country": country,
+#         "dialCode": dial_code,
+#         "raw": raw,
+#     }
+
+
 # def normalize_phone(value: str) -> str:
-#     digits = digits_only(value)
+#     return normalize_phone_detail(value).get("number", "")
 
-#     if not digits:
-#         return ""
 
-#     if digits.startswith("91") and len(digits) == 12:
-#         return digits[-10:]
+# def extract_phone_details(text: str) -> List[Dict[str, str]]:
+#     phones: List[Dict[str, str]] = []
+#     seen = set()
+#     last_country = ""
 
-#     if len(digits) == 10 and digits[0] in "6789":
-#         return digits
+#     for candidate in PHONE_BLOCK_REGEX.findall(text or ""):
+#         phone = normalize_phone_detail(candidate, fallback_country=last_country)
+#         number = phone.get("number", "")
+#         if not number:
+#             continue
 
-#     if len(digits) == 10 and digits.startswith("0562"):
-#         return digits
+#         if phone.get("country"):
+#             last_country = phone["country"]
 
-#     if len(digits) == 11 and digits.startswith("0"):
-#         return digits
+#         key = (phone.get("country", ""), number)
+#         if key not in seen:
+#             seen.add(key)
+#             phones.append(phone)
 
-#     if 8 <= len(digits) <= 11 and not digits.startswith("91"):
-#         return digits
-
-#     if len(digits) > 11:
-#         last_10 = digits[-10:]
-#         if last_10[0] in "6789":
-#             return last_10
-
-#     return ""
+#     return phones
 
 
 # def extract_emails(text: str) -> List[str]:
@@ -180,14 +256,7 @@
 
 
 # def extract_phones(text: str) -> List[str]:
-#     phones: List[str] = []
-
-#     for candidate in PHONE_BLOCK_REGEX.findall(text or ""):
-#         phone = normalize_phone(candidate)
-#         if phone and phone not in phones:
-#             phones.append(phone)
-
-#     return phones
+#     return [phone["number"] for phone in extract_phone_details(text)]
 
 
 # def extract_gstin(text: str) -> str:
@@ -554,7 +623,8 @@
 
 #     emails = extract_emails(full_text)
 #     websites = extract_websites(full_text)
-#     phones = extract_phones(full_text)
+#     phone_details = extract_phone_details(full_text)
+#     phones = [phone["number"] for phone in phone_details]
 #     gstin = extract_gstin(full_text)
 
 #     company = pick_company(lines)
@@ -583,8 +653,12 @@
 #         "customerCompany": company,
 #         "personName": person_name,
 #         "designation": designation,
-#         "mobile": phones[0] if len(phones) > 0 else "",
-#         "mobile2": phones[1] if len(phones) > 1 else "",
+#         "mobile": phone_details[0]["number"] if len(phone_details) > 0 else "",
+#         "mobile2": phone_details[1]["number"] if len(phone_details) > 1 else "",
+#         "mobileCountry": phone_details[0].get("country") if len(phone_details) > 0 else "IN",
+#         "mobile2Country": phone_details[1].get("country") if len(phone_details) > 1 else (phone_details[0].get("country") if len(phone_details) > 0 else "IN"),
+#         "mobileDialCode": phone_details[0].get("dialCode") if len(phone_details) > 0 else "+91",
+#         "mobile2DialCode": phone_details[1].get("dialCode") if len(phone_details) > 1 else (phone_details[0].get("dialCode") if len(phone_details) > 0 else "+91"),
 #         "email": emails[0] if len(emails) > 0 else "",
 #         "email2": emails[1] if len(emails) > 1 else "",
 #         "address": address,
@@ -824,7 +898,8 @@
 #         "rawText": raw_text,
 #         "image_name": uploaded["filename"],
 #         "image_url": uploaded["image_url"],
-#     } 
+#     }
+
 
 import json
 import os
@@ -836,6 +911,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from google.cloud import vision
 from google.oauth2 import service_account
 from pydantic import BaseModel
+
+try:
+    import phonenumbers
+    from phonenumbers import NumberParseException, PhoneNumberMatcher
+except Exception:  # phonenumbers is optional but recommended
+    phonenumbers = None
+    NumberParseException = Exception
+    PhoneNumberMatcher = None
 
 from components.tenant_resolver import get_tenant_by_slug, resolve_tenant_slug_from_request
 
@@ -851,7 +934,7 @@ WEBSITE_REGEX = re.compile(
     r"(?:https?://)?(?:www\.)?[A-Za-z0-9][A-Za-z0-9.-]+\.(?:com|in|co|net|org|io|biz|info|me|tech|ai)(?:/[^\s]*)?",
     re.I,
 )
-PHONE_BLOCK_REGEX = re.compile(r"(?:\+?\d[\d\s()./-]{6,}\d)")
+PHONE_BLOCK_REGEX = re.compile(r"(?:\+?\d[\d\s()./-]{5,}\d)")
 GSTIN_REGEX = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b", re.I)
 
 DESIGNATION_WORDS = [
@@ -968,13 +1051,15 @@ def digits_only(value: str) -> str:
 PHONE_COUNTRIES = [
     {"country": "IN", "dialCode": "+91"},
     {"country": "US", "dialCode": "+1"},
+    {"country": "CA", "dialCode": "+1"},
+    {"country": "PK", "dialCode": "+92"},
+    {"country": "IL", "dialCode": "+972"},
     {"country": "CN", "dialCode": "+86"},
     {"country": "KW", "dialCode": "+965"},
     {"country": "GB", "dialCode": "+44"},
     {"country": "AE", "dialCode": "+971"},
     {"country": "SG", "dialCode": "+65"},
     {"country": "AU", "dialCode": "+61"},
-    {"country": "CA", "dialCode": "+1"},
     {"country": "SA", "dialCode": "+966"},
     {"country": "QA", "dialCode": "+974"},
     {"country": "OM", "dialCode": "+968"},
@@ -998,42 +1083,103 @@ SORTED_PHONE_COUNTRIES = sorted(
     reverse=True,
 )
 
+PHONE_LABEL_REGEX = re.compile(
+    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact)\s*[:：-]?\s*(.+)",
+    re.I,
+)
+
+
+def get_fallback_country(digits: str) -> Dict[str, str]:
+    for item in SORTED_PHONE_COUNTRIES:
+        code_digits = item["dialCode"].replace("+", "")
+        if digits.startswith(code_digits):
+            return item
+    return {}
+
+
+def reject_false_phone(raw: str) -> bool:
+    value = raw or ""
+    lowered = value.lower()
+
+    # Reject prices, dimensions and decimals like 92.50, $3.85, 20x32.
+    if "$" in value or "₹" in value or "€" in value or "£" in value:
+        return True
+    if re.search(r"\b\d+\s*[x×]\s*\d+\b", lowered):
+        return True
+    if "+" not in value and re.search(r"\d+\.\d+", value):
+        return True
+    return False
+
+
+def phone_detail_from_phonenumbers(value: str, default_region: str = "IN") -> Dict[str, str]:
+    if phonenumbers is None:
+        return {}
+
+    raw = clean_line(value or "")
+    if reject_false_phone(raw):
+        return {}
+
+    try:
+        parsed = phonenumbers.parse(raw, None if "+" in raw else default_region)
+        if not phonenumbers.is_possible_number(parsed) or not phonenumbers.is_valid_number(parsed):
+            return {}
+        country = phonenumbers.region_code_for_number(parsed) or default_region
+        dial_code = f"+{parsed.country_code}"
+        national_number = str(parsed.national_number)
+        if not (6 <= len(national_number) <= 15):
+            return {}
+        return {
+            "number": national_number,
+            "country": country,
+            "dialCode": dial_code,
+            "raw": raw,
+        }
+    except Exception:
+        return {}
+
 
 def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, str]:
     raw = clean_line(value or "")
     raw = re.sub(r"(?:ext\.?|extension|x)\s*\d+$", "", raw, flags=re.I)
-    digits = digits_only(raw)
 
+    if reject_false_phone(raw):
+        return {"number": "", "country": "", "dialCode": "", "raw": raw}
+
+    default_region = fallback_country or "IN"
+    parsed = phone_detail_from_phonenumbers(raw, default_region=default_region)
+    if parsed:
+        return parsed
+
+    digits = digits_only(raw)
     if not digits or len(digits) < 6:
         return {"number": "", "country": "", "dialCode": "", "raw": raw}
 
     country = ""
     dial_code = ""
 
-    if "+" in raw or len(digits) > 10:
-        for item in SORTED_PHONE_COUNTRIES:
-            code_digits = item["dialCode"].replace("+", "")
-            if digits.startswith(code_digits):
-                country = item["country"]
-                dial_code = item["dialCode"]
-                digits = digits[len(code_digits):]
-                break
+    # International number: remove exact country code only, never guess from random digits.
+    if "+" in raw:
+        match = get_fallback_country(digits)
+        if not match:
+            return {"number": "", "country": "", "dialCode": "", "raw": raw}
+        country = match["country"]
+        dial_code = match["dialCode"]
+        digits = digits[len(dial_code.replace("+", "")):]
 
-    if not country and fallback_country:
+    elif fallback_country:
         country = fallback_country
         match = next((item for item in PHONE_COUNTRIES if item["country"] == fallback_country), None)
         dial_code = match["dialCode"] if match else ""
 
-    # For plain Indian mobile numbers without +91, keep existing India behavior.
-    if not country and len(digits) == 10 and digits[0] in "6789":
+    elif len(digits) == 10 and digits[0] in "6789":
         country = "IN"
         dial_code = "+91"
 
-    # Preserve landline/local numbers instead of forcing them into 10-digit mobile format.
-    if len(digits) > 15:
-        digits = digits[-15:]
+    else:
+        # Do not treat random amounts/measurements as phone numbers.
+        return {"number": "", "country": "", "dialCode": "", "raw": raw}
 
-    if len(digits) < 6:
+    if not (6 <= len(digits) <= 15):
         return {"number": "", "country": "", "dialCode": "", "raw": raw}
 
     return {
@@ -1043,6 +1189,47 @@ def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, 
         "raw": raw,
     }
 
+
+def add_phone(phones: List[Dict[str, str]], seen: set, phone: Dict[str, str]) -> None:
+    number = phone.get("number", "")
+    if not number:
+        return
+    key = (phone.get("country", ""), number)
+    if key not in seen:
+        seen.add(key)
+        phones.append(phone)
+
+
+def extract_phone_details(text: str) -> List[Dict[str, str]]:
+    phones: List[Dict[str, str]] = []
+    seen = set()
+    full_text = text or ""
+
+    # Best path: Google OCR text + libphonenumber exact validation for all countries.
+    if PhoneNumberMatcher is not None:
+        for match in PhoneNumberMatcher(full_text, "IN"):
+            raw = match.raw_string
+            phone = phone_detail_from_phonenumbers(raw, default_region="IN")
+            add_phone(phones, seen, phone)
+
+    # Fallback path: only parse regex blocks if they contain +country-code or phone label context.
+    last_country = ""
+    for line in split_lines(full_text):
+        label_match = PHONE_LABEL_REGEX.search(line)
+        line_has_phone_label = bool(label_match)
+        candidates = PHONE_BLOCK_REGEX.findall(line)
+
+        for candidate in candidates:
+            has_plus = "+" in candidate
+            if not has_plus and not line_has_phone_label:
+                continue
+
+            phone = normalize_phone_detail(candidate, fallback_country=last_country if not has_plus else "")
+            if phone.get("country"):
+                last_country = phone["country"]
+            add_phone(phones, seen, phone)
+
+    return phones
 
 def normalize_phone(value: str) -> str:
     return normalize_phone_detail(value).get("number", "")
