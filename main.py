@@ -1,3 +1,4 @@
+
 # import json
 # import os
 # from datetime import datetime
@@ -48,6 +49,8 @@
 #     designation: str | None = None
 #     mobile: str | None = None
 #     mobile2: str | None = None
+#     mobileCountry: str | None = None
+#     mobile2Country: str | None = None
 #     email: EmailStr | None = None
 #     email2: EmailStr | None = None
 #     address: str | None = None
@@ -273,7 +276,8 @@
 #     index_path = os.path.join(BUILD_DIR, "index.html")
 #     if os.path.exists(index_path):
 #         return FileResponse(index_path)
-#     return {"error": "Frontend not built"} 
+#     return {"error": "Frontend not built"}
+
 import json
 import os
 from datetime import datetime
@@ -332,6 +336,9 @@ class ScanCard(BaseModel):
     notes: str | None = None
     qtyScope: str | None = None
     image_name: str | None = None
+    imagename: str | None = None
+    card_image_back: str | None = None
+    back_image_name: str | None = None
 
     @field_validator("email", "email2", mode="before")
     @classmethod
@@ -448,13 +455,14 @@ def save_card(
             email,
             email2,
             address,
+            card_image_back,
             remark,
             qty,
             card_image,
             added_date,
             added_by
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         cursor.execute(
@@ -473,7 +481,8 @@ def save_card(
                 clean(data.address),
                 clean(data.notes),
                 clean(data.qtyScope),
-                clean(data.image_name),
+                clean(data.image_name or data.imagename),
+                clean(data.card_image_back or data.back_image_name),
                 datetime.now(),
                 1,
             ),
