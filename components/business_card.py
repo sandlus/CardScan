@@ -1211,9 +1211,46 @@ def digits_only(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+def extract_primary_indian_phone(value: str) -> str:
+    raw = clean_line(value or "")
+    if not raw:
+        return ""
+
+    # Indian mobile with or without labels:
+    # 9219663705, (M): 9837336960, M: 9837336960, Mob: +91 9837336960
+    mobile_match = re.search(
+        r"(?:^|\b|[()])(?:mobile|mob|cell|m)?(?:\)|\b)?\s*[:：-]?\s*(?:\+?\s*91[\s-]*)?([6-9]\d{9})(?!\d)",
+        raw,
+        re.I,
+    )
+    if mobile_match:
+        return f"+91 {mobile_match.group(1)}"
+
+    # Indian landline / STD formats:
+    # 0562-4043636, (0562) 3278358, (0562) 3278359, 011-23456789
+    landline_match = re.search(
+        r"(?:^|\b|[()])(?:phone|tel|telephone|office|landline|ph|o)?(?:\)|\b)?\s*[:：-]?\s*(?:\+?\s*91[\s-]*)?\(?\s*(0\d{2,4})\s*\)?[\s.\-]*(\d{6,8})(?!\d)",
+        raw,
+        re.I,
+    )
+    if landline_match:
+        local_digits = f"{landline_match.group(1)}{landline_match.group(2)}"
+        if 10 <= len(local_digits) <= 11:
+            return f"+91 {local_digits}"
+
+    return ""
+
+
 def extract_primary_international_segment(value: str) -> str:
     raw = clean_line(value or "")
-    if not raw or "+" not in raw:
+    if not raw:
+        return raw
+
+    indian_phone = extract_primary_indian_phone(raw)
+    if indian_phone:
+        return indian_phone
+
+    if "+" not in raw:
         return raw
 
     # Handles OCR lines like: "TGH +965 99811342 2200 6611 MYEAR".
@@ -1265,7 +1302,7 @@ PHONE_COUNTRIES = [
 ]
 
 PHONE_LENGTH_RULES = {
-    "IN": {"min": 10, "max": 10}, "US": {"min": 10, "max": 10},
+    "IN": {"min": 10, "max": 11}, "US": {"min": 10, "max": 10},
     "CA": {"min": 10, "max": 10}, "PK": {"min": 10, "max": 10},
     "IL": {"min": 9, "max": 9}, "CN": {"min": 11, "max": 11},
     "KW": {"min": 8, "max": 8}, "GB": {"min": 10, "max": 10},
@@ -1288,7 +1325,7 @@ SORTED_PHONE_COUNTRIES = sorted(
 )
 
 PHONE_LABEL_REGEX = re.compile(
-    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact)\s*[:：-]?\s*(.+)",
+    r"(?:telephone|whatsapp|mobile|phone|contact|office|cell|mob|tel|wa|\(?m\)?)\s*[:：-]?\s*(.+)",
     re.I,
 )
 
@@ -1454,6 +1491,15 @@ def extract_phone_details(text: str) -> List[Dict[str, str]]:
     last_country = ""
     for line in split_lines(full_text):
         line_has_phone_label = bool(PHONE_LABEL_REGEX.search(line))
+
+        # Extra Indian business-card support: mobile or STD landline can appear without labels.
+        indian_candidate = extract_primary_indian_phone(line)
+        if indian_candidate:
+            phone = normalize_phone_detail(indian_candidate, fallback_country="IN")
+            add_phone(phones, seen, phone)
+            if phone.get("country"):
+                last_country = phone["country"]
+
         candidates = PHONE_BLOCK_REGEX.findall(line)
 
         for candidate in candidates:
@@ -2090,6 +2136,7 @@ async def scan_business_card_live(
     phone: Optional[str] = Form(default=None),
     email: Optional[str] = Form(default=None),
     company: Optional[str] = Form(default=None),
+    card_side: Optional[str] = Form(default=None),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     if not image.content_type or not image.content_type.startswith("image/"):
