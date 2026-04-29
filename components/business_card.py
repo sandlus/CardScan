@@ -1161,19 +1161,26 @@ def digits_only(value: str) -> str:
 
 def extract_primary_international_segment(value: str) -> str:
     raw = clean_line(value or "")
-    raw = extract_primary_international_segment(raw)
     if not raw or "+" not in raw:
         return raw
 
-    match = re.search(r"(\+\d{1,4}[\s\-\.]*\d[\d\s\-\.]*)", raw)
-    if not match:
-        return raw
+    # Handles OCR lines like: "TGH +965 99811342 2200 6611 MYEAR".
+    # It keeps the first valid national number after the country code only.
+    for item in SORTED_PHONE_COUNTRIES:
+        code_digits = item["dialCode"].replace("+", "")
+        rule = PHONE_LENGTH_RULES.get(item["country"], {"min": 6, "max": 15})
+        pattern = rf"\+\s*{re.escape(code_digits)}(?=\D|$)([\d\s()./\-]{{{rule['min']},40}})"
+        match = re.search(pattern, raw)
+        if not match:
+            continue
 
-    candidate = match.group(1)
-    pieces = re.split(r"\s*[-–—]\s*", candidate)
-    if pieces and pieces[0].strip():
-        return pieces[0].strip()
-    return candidate.strip()
+        national_digits = digits_only(match.group(1))
+        first_number = national_digits[: rule["max"]]
+
+        if len(first_number) >= rule["min"]:
+            return f'{item["dialCode"]} {first_number}'
+
+    return raw
 
 
 PHONE_COUNTRIES = [
@@ -1204,6 +1211,23 @@ PHONE_COUNTRIES = [
     {"country": "KR", "dialCode": "+82"},
     {"country": "HK", "dialCode": "+852"},
 ]
+
+PHONE_LENGTH_RULES = {
+    "IN": {"min": 10, "max": 10}, "US": {"min": 10, "max": 10},
+    "CA": {"min": 10, "max": 10}, "PK": {"min": 10, "max": 10},
+    "IL": {"min": 9, "max": 9}, "CN": {"min": 11, "max": 11},
+    "KW": {"min": 8, "max": 8}, "GB": {"min": 10, "max": 10},
+    "AE": {"min": 9, "max": 9}, "SG": {"min": 8, "max": 8},
+    "AU": {"min": 9, "max": 9}, "SA": {"min": 9, "max": 9},
+    "QA": {"min": 8, "max": 8}, "OM": {"min": 8, "max": 8},
+    "BH": {"min": 8, "max": 8}, "DE": {"min": 10, "max": 11},
+    "FR": {"min": 9, "max": 9}, "IT": {"min": 9, "max": 10},
+    "ES": {"min": 9, "max": 9}, "NL": {"min": 9, "max": 9},
+    "TR": {"min": 10, "max": 10}, "TH": {"min": 9, "max": 10},
+    "MY": {"min": 9, "max": 10}, "JP": {"min": 10, "max": 10},
+    "KR": {"min": 9, "max": 10}, "HK": {"min": 8, "max": 8},
+}
+
 
 SORTED_PHONE_COUNTRIES = sorted(
     PHONE_COUNTRIES,
@@ -1269,6 +1293,7 @@ def phone_detail_from_phonenumbers(value: str, default_region: str = "IN") -> Di
 def normalize_phone_detail(value: str, fallback_country: str = "") -> Dict[str, str]:
     raw = clean_line(value or "")
     raw = re.sub(r"(?:ext\.?|extension|x)\s*\d+$", "", raw, flags=re.I)
+    raw = extract_primary_international_segment(raw)
 
     if reject_false_phone(raw):
         return {"number": "", "country": "", "dialCode": "", "raw": raw}
@@ -1366,21 +1391,31 @@ def normalize_phone(value: str) -> str:
 def extract_phone_details(text: str) -> List[Dict[str, str]]:
     phones: List[Dict[str, str]] = []
     seen = set()
+    full_text = text or ""
+
+    if PhoneNumberMatcher is not None:
+        for match in PhoneNumberMatcher(full_text, "IN"):
+            raw = extract_primary_international_segment(match.raw_string)
+            phone = phone_detail_from_phonenumbers(raw, default_region="IN")
+            add_phone(phones, seen, phone)
+
     last_country = ""
+    for line in split_lines(full_text):
+        line_has_phone_label = bool(PHONE_LABEL_REGEX.search(line))
+        candidates = PHONE_BLOCK_REGEX.findall(line)
 
-    for candidate in PHONE_BLOCK_REGEX.findall(text or ""):
-        phone = normalize_phone_detail(candidate, fallback_country=last_country)
-        number = phone.get("number", "")
-        if not number:
-            continue
+        for candidate in candidates:
+            has_plus = "+" in candidate
+            if not has_plus and not line_has_phone_label:
+                continue
 
-        if phone.get("country"):
-            last_country = phone["country"]
-
-        key = (phone.get("country", ""), number)
-        if key not in seen:
-            seen.add(key)
-            phones.append(phone)
+            phone = normalize_phone_detail(
+                candidate,
+                fallback_country=last_country if not has_plus else "",
+            )
+            if phone.get("country"):
+                last_country = phone["country"]
+            add_phone(phones, seen, phone)
 
     return phones
 
@@ -2042,6 +2077,3 @@ async def scan_business_card_live(
         "image_name": uploaded["filename"],
         "image_url": uploaded["image_url"],
     } 
-
-
-
