@@ -1133,7 +1133,7 @@ def get_vision_client() -> vision.ImageAnnotatorClient:
 
 
 def clean_line(line: str) -> str:
-    line = re.sub(r"[|â€¢Â·]+", " ", line or "")
+    line = re.sub(r"[|•·]+", " ", line or "")
     line = re.sub(r"[\t\r]+", " ", line)
     line = re.sub(r"\s+", " ", line)
     return line.strip(" -,:;|")
@@ -1157,6 +1157,23 @@ def unique_list(items: List[str]) -> List[str]:
 
 def digits_only(value: str) -> str:
     return re.sub(r"\D", "", value or "")
+
+
+def extract_primary_international_segment(value: str) -> str:
+    raw = clean_line(value or "")
+    raw = extract_primary_international_segment(raw)
+    if not raw or "+" not in raw:
+        return raw
+
+    match = re.search(r"(\+\d{1,4}[\s\-\.]*\d[\d\s\-\.]*)", raw)
+    if not match:
+        return raw
+
+    candidate = match.group(1)
+    pieces = re.split(r"\s*[-–—]\s*", candidate)
+    if pieces and pieces[0].strip():
+        return pieces[0].strip()
+    return candidate.strip()
 
 
 PHONE_COUNTRIES = [
@@ -1195,7 +1212,7 @@ SORTED_PHONE_COUNTRIES = sorted(
 )
 
 PHONE_LABEL_REGEX = re.compile(
-    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact)\s*[:ï¼š-]?\s*(.+)",
+    r"(?:phone|mobile|mob|cell|tel|telephone|office|whatsapp|wa|contact)\s*[:：-]?\s*(.+)",
     re.I,
 )
 
@@ -1213,9 +1230,9 @@ def reject_false_phone(raw: str) -> bool:
     lowered = value.lower()
 
     # Reject prices, dimensions and decimals like 92.50, $3.85, 20x32.
-    if "$" in value or "â‚¹" in value or "â‚¬" in value or "Â£" in value:
+    if "$" in value or "₹" in value or "€" in value or "£" in value:
         return True
-    if re.search(r"\b\d+\s*[xÃ—]\s*\d+\b", lowered):
+    if re.search(r"\b\d+\s*[x×]\s*\d+\b", lowered):
         return True
     if "+" not in value and re.search(r"\d+\.\d+", value):
         return True
@@ -1523,7 +1540,7 @@ def looks_like_person_name(line: str) -> bool:
     if any(word in lowered for word in NAME_BLOCKLIST):
         return False
 
-    # âœ… IMPORTANT:
+    # ✅ IMPORTANT:
     # If line has subject/designation in brackets like:
     # V.K. Agarwal(maths)
     # do NOT treat it as person name.
@@ -2024,4 +2041,7 @@ async def scan_business_card_live(
         "rawText": raw_text,
         "image_name": uploaded["filename"],
         "image_url": uploaded["image_url"],
-    }
+    } 
+
+
+
