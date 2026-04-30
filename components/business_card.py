@@ -1110,7 +1110,7 @@
 #         "image_name": uploaded["filename"],
 #         "image_url": uploaded["image_url"],
 #     } 
-
+ 
 import json
 import os
 import re
@@ -1489,6 +1489,62 @@ def add_phone(phones: List[Dict[str, str]], seen: set, phone: Dict[str, str]) ->
         phones.append(phone)
 
 
+def extract_indian_slash_phone_details(line: str) -> List[Dict[str, str]]:
+    """
+    Handles Indian business-card lines where OCR reads the phone icon as a letter:
+    C 9320061511 / 9320261511 / 022 49237373 / 022 49247474
+
+    Output order is preserved:
+    1) 10-digit Indian mobiles starting with 6/7/8/9
+    2) Indian STD landlines like 022 49237373
+    """
+    raw = clean_line(line or "")
+    if not raw or "/" not in raw:
+        return []
+
+    parts = [part.strip() for part in re.split(r"/+", raw) if part.strip()]
+    if len(parts) < 2:
+        return []
+
+    phones: List[Dict[str, str]] = []
+    seen_numbers = set()
+
+    for part in parts:
+        # Remove OCR icon noise/labels before the number, e.g. "C 9320061511", "Tel: 022 49237373"
+        cleaned_part = re.sub(
+            r"^(?:c|o|q|☎|phone|ph|tel|telephone|mobile|mob|cell|contact|office|landline)\s*[:：-]?\s*",
+            "",
+            part.strip(),
+            flags=re.I,
+        )
+        digits = digits_only(cleaned_part)
+
+        number = ""
+
+        # Indian mobile.
+        mobile_match = re.search(r"(?<!\d)([6-9]\d{9})(?!\d)", digits)
+        if mobile_match:
+            number = mobile_match.group(1)
+
+        # Indian STD landline such as 022 49237373 / 011 23456789 / 0562 4043636.
+        elif re.match(r"^0\d{9,10}$", digits):
+            number = digits
+
+        if not number or number in seen_numbers:
+            continue
+
+        seen_numbers.add(number)
+        phones.append({
+            "number": number,
+            "country": "IN",
+            "dialCode": "+91",
+            "raw": clean_line(part),
+        })
+
+    # Use this special parser only when there are at least two valid Indian phone values.
+    return phones if len(phones) >= 2 else []
+
+
 def extract_phone_details(text: str) -> List[Dict[str, str]]:
     phones: List[Dict[str, str]] = []
     seen = set()
@@ -1528,15 +1584,25 @@ def extract_phone_details(text: str) -> List[Dict[str, str]]:
     phones: List[Dict[str, str]] = []
     seen = set()
     full_text = text or ""
+    lines = split_lines(full_text)
 
+    # 1) Special Indian slash-line support first so mobile/mobile2 are filled correctly.
+    # Example: C 9320061511 / 9320261511 / 022 49237373 / 022 49247474
+    for line in lines:
+        slash_phones = extract_indian_slash_phone_details(line)
+        for phone in slash_phones:
+            add_phone(phones, seen, phone)
+
+    # 2) Existing libphonenumber path remains unchanged for general/international cases.
     if PhoneNumberMatcher is not None:
         for match in PhoneNumberMatcher(full_text, "IN"):
             raw = extract_primary_international_segment(match.raw_string)
             phone = phone_detail_from_phonenumbers(raw, default_region="IN")
             add_phone(phones, seen, phone)
 
+    # 3) Existing fallback path remains unchanged.
     last_country = ""
-    for line in split_lines(full_text):
+    for line in lines:
         line_has_phone_label = bool(PHONE_LABEL_REGEX.search(line))
 
         # Extra Indian business-card support: mobile or STD landline can appear without labels.
@@ -1982,6 +2048,7 @@ def parse_text(raw_text: str) -> Tuple[Dict[str, Any], List[str]]:
         "mobile2Country": phone_details[1].get("country") if len(phone_details) > 1 else (phone_details[0].get("country") if len(phone_details) > 0 else "IN"),
         "mobileDialCode": phone_details[0].get("dialCode") if len(phone_details) > 0 else "+91",
         "mobile2DialCode": phone_details[1].get("dialCode") if len(phone_details) > 1 else (phone_details[0].get("dialCode") if len(phone_details) > 0 else "+91"),
+        "phoneSuggestions": [phone["number"] for phone in phone_details],
         "email": emails[0] if len(emails) > 0 else "",
         "email2": emails[1] if len(emails) > 1 else "",
         "address": address,
@@ -2016,6 +2083,11 @@ def build_selections(parsed: Dict[str, Any], lines: List[str]) -> List[Dict[str,
         value = clean_line(str(parsed.get(key, "") or ""))
         if value:
             selections.append({"label": label, "value": value})
+
+    for index, phone in enumerate(parsed.get("phoneSuggestions") or []):
+        value = clean_line(str(phone or ""))
+        if value:
+            selections.append({"label": f"Phone Option {index + 1}", "value": value})
 
     for index, line in enumerate(lines):
         if line:
