@@ -1153,7 +1153,7 @@ async def fetch_all_bills(
         conn = get_connection(tenant.db)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        filters = ["bd.quote_status = 0"]
+        filters = ["bd.quote_status = 6"]
         params: List[Any] = []
 
         bill_filter_date = "COALESCE(DATE(bd.bill_date), DATE(bd.date_created))"
@@ -1528,7 +1528,7 @@ async def submit_bill(
                     bill_date = COALESCE(%s, bill_date)
                 WHERE bill_id = %s
                 """,
-                (0, payload.billDate, bill_id),
+                (6, payload.billDate, bill_id),
             )
         else:
             prefix = get_bill_number_prefix(cursor)
@@ -1551,7 +1551,7 @@ async def submit_bill(
                     NOW()
                 )
                 """,
-                (bill_number, payload.billDate, 0),
+                (bill_number, payload.billDate, 6),
             )
             bill_id = int(cursor.lastrowid)
 
@@ -1586,7 +1586,7 @@ async def submit_bill(
             "data": {
                 "bill_id": bill_id,
                 "bill_number": bill_number,
-                "quote_status": 0,
+                "quote_status": 6,
                 "customerName": payload.customerName or "Walk-In Customer",
                 "billDate": payload.billDate,
                 "taxableAmount": taxable_amount,
