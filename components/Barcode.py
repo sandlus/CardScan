@@ -305,24 +305,6 @@ def build_capture_image_url(capture_img: Any, request: Request) -> str:
 
 
 
-def upload_image_to_php(
-    bill_number: str,
-    capture_image_data: str,
-) -> str:
-
-    upload_url = os.getenv(
-        "BARCODE_UPLOAD_API_URL",
-        ""
-    ).strip()
-
-    if not upload_url:
-        raise HTTPException(
-            status_code=500,
-            detail="BARCODE_UPLOAD_API_URL not configured."
-        )
-
-    import base64
-import re
 
 def upload_image_to_php(
     bill_number: str,
@@ -652,20 +634,47 @@ def get_bill_number_prefix(cursor: pymysql.cursors.DictCursor) -> str:
     return prefix or "DES"
 
 
-def generate_bill_number(cursor: pymysql.cursors.DictCursor, prefix: str) -> str:
-    query = """
-        SELECT bill_id, bill_number
+# def generate_bill_number(cursor: pymysql.cursors.DictCursor, prefix: str) -> str:
+#     query = """
+#         SELECT bill_id, bill_number
+#         FROM bill_details
+#         ORDER BY bill_id DESC
+#         LIMIT 1
+#     """
+#     cursor.execute(query)
+#     row = cursor.fetchone()
+
+#     last_bill_id = int((row or {}).get("bill_id") or 0)
+#     new_bill_id = last_bill_id + 1
+
+#     return f"{prefix}-{new_bill_id:05d}"
+
+def generate_bill_number(cursor, prefix):
+
+    cursor.execute("""
+        SELECT bill_number
         FROM bill_details
+        WHERE bill_number IS NOT NULL
+          AND bill_number <> ''
         ORDER BY bill_id DESC
         LIMIT 1
-    """
-    cursor.execute(query)
+    """)
+
     row = cursor.fetchone()
 
-    last_bill_id = int((row or {}).get("bill_id") or 0)
-    new_bill_id = last_bill_id + 1
+    if not row:
+        return f"{prefix}-00001"
 
-    return f"{prefix}-{new_bill_id:05d}"
+    last_bill_number = str(row.get("bill_number") or "").strip()
+
+    try:
+        last_sequence = int(last_bill_number.split("-")[-1])
+    except Exception:
+        last_sequence = 0
+
+    next_sequence = last_sequence + 1
+
+    return f"{prefix}-{next_sequence:05d}"
 
 
 def find_item_id_for_hold_bill(cursor: pymysql.cursors.DictCursor, item: HoldBillItemPayload) -> int:
