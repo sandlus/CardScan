@@ -1,0 +1,14 @@
+.env
+key.json
+build/
+uploads/
+__pycache__/
+
+.env
+key.json
+
+build/
+uploads/
+
+__pycache__/
+*.pyc
