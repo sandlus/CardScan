@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 import pymysql
-
+import hashlib
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie
 from pydantic import BaseModel, EmailStr
 
@@ -94,15 +94,21 @@ def login(
         print("DB EMAIL:", user["email"])
         print("DB PASSWORD:", repr(user["password"]))
         print("ENTERED PASSWORD:", repr(payload.password))
+        print("HASH GENERATED:", entered_password_hash)
         print("IS_ACTIVE:", user["is_active"])
 
-        if str(user["password"]) != str(
-            payload.password
-        ):
+        
+
+        entered_password_hash = hashlib.sha1(
+            payload.password.encode()
+        ).hexdigest()
+
+        if user["password"] != entered_password_hash:
             raise HTTPException(
                 status_code=401,
                 detail="Invalid email or password"
             )
+           
 
         session_payload = {
             "user_id": user["id"],
