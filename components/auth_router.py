@@ -79,7 +79,7 @@ def login(
                 detail="Invalid email or password"
             )
 
-        if int(user.get("is_active", 0)) != 1:
+        if int(user.get("is_active", 0)) != 0:
             raise HTTPException(
                 status_code=403,
                 detail="User account is inactive"
