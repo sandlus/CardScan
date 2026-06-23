@@ -91,17 +91,20 @@ def login(
         # Replace later with bcrypt check
         # ------------------------------------------------
 
-        print("DB EMAIL:", user["email"])
-        print("DB PASSWORD:", repr(user["password"]))
-        print("ENTERED PASSWORD:", repr(payload.password))
-        print("HASH GENERATED:", entered_password_hash)
-        print("IS_ACTIVE:", user["is_active"])
+       
 
         
 
         entered_password_hash = hashlib.sha1(
             payload.password.encode()
         ).hexdigest()
+
+        print("DB EMAIL:", user["email"])
+        print("DB PASSWORD:", repr(user["password"]))
+        print("ENTERED PASSWORD:", repr(payload.password))
+        print("HASH GENERATED:", entered_password_hash)
+        print("IS_ACTIVE:", user["is_active"])
+
 
         if user["password"] != entered_password_hash:
             raise HTTPException(
