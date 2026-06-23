@@ -91,6 +91,11 @@ def login(
         # Replace later with bcrypt check
         # ------------------------------------------------
 
+        print("DB EMAIL:", user["email"])
+        print("DB PASSWORD:", repr(user["password"]))
+        print("ENTERED PASSWORD:", repr(payload.password))
+        print("IS_ACTIVE:", user["is_active"])
+
         if str(user["password"]) != str(
             payload.password
         ):
