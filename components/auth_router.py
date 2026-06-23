@@ -52,7 +52,11 @@ def login(
             pymysql.cursors.DictCursor
         )
 
-        query = """
+        # ----------------------------------------
+# Check app_user
+# ----------------------------------------
+
+        cursor.execute("""
             SELECT
                 id,
                 fname,
@@ -60,18 +64,58 @@ def login(
                 email,
                 password,
                 role,
-                is_active
+                is_active,
+                'app_user' AS source_table
             FROM app_user
             WHERE email=%s
             LIMIT 1
-        """
+        """, (payload.email,))
 
-        cursor.execute(
-            query,
-            (payload.email,)
-        )
+        app_user = cursor.fetchone()
 
-        user = cursor.fetchone()
+        # ----------------------------------------
+        # Check bay_users
+        # ----------------------------------------
+
+        cursor.execute("""
+            SELECT
+                id,
+                fname,
+                lname,
+                email,
+                password,
+                role,
+                is_active,
+                'bay_users' AS source_table
+            FROM bay_users
+            WHERE email=%s
+            LIMIT 1
+        """, (payload.email,))
+
+        bay_user = cursor.fetchone()
+
+        entered_password_hash = hashlib.sha1(
+            payload.password.encode()
+        ).hexdigest()
+
+        user = None
+
+        # Match app_user
+        if (
+            app_user
+            and int(app_user.get("is_active", 0)) == 0
+            and app_user["password"] == entered_password_hash
+        ):
+            user = app_user
+
+        # Match bay_users
+        if (
+            user is None
+            and bay_user
+            and int(bay_user.get("is_active", 0)) == 0
+            and bay_user["password"] == entered_password_hash
+        ):
+            user = bay_user
 
         if not user:
             raise HTTPException(
@@ -79,11 +123,38 @@ def login(
                 detail="Invalid email or password"
             )
 
-        if int(user.get("is_active", 0)) != 0:
-            raise HTTPException(
-                status_code=403,
-                detail="User account is inactive"
-            )
+        # query = """
+        #     SELECT
+        #         id,
+        #         fname,
+        #         lname,
+        #         email,
+        #         password,
+        #         role,
+        #         is_active
+        #     FROM app_user
+        #     WHERE email=%s
+        #     LIMIT 1
+        # """
+
+        # cursor.execute(
+        #     query,
+        #     (payload.email,)
+        # )
+
+        # user = cursor.fetchone()
+
+        # if not user:
+        #     raise HTTPException(
+        #         status_code=401,
+        #         detail="Invalid email or password"
+        #     )
+
+        # if int(user.get("is_active", 0)) != 0:
+        #     raise HTTPException(
+        #         status_code=403,
+        #         detail="User account is inactive"
+        #     )
 
         # ------------------------------------------------
         # CURRENT PASSWORD CHECK
@@ -91,39 +162,18 @@ def login(
         # Replace later with bcrypt check
         # ------------------------------------------------
 
-       
-
-        
-
-        entered_password_hash = hashlib.sha1(
-            payload.password.encode()
-        ).hexdigest()
-
-        print("DB EMAIL:", user["email"])
-        print("DB PASSWORD:", repr(user["password"]))
-        print("ENTERED PASSWORD:", repr(payload.password))
-        print("HASH GENERATED:", entered_password_hash)
-        print("IS_ACTIVE:", user["is_active"])
-
-
-        if user["password"] != entered_password_hash:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid email or password"
-            )
-           
-
         session_payload = {
             "user_id": user["id"],
             "tenant": tenant.slug,
             "email": user["email"],
             "role": user["role"],
+            "source_table": user["source_table"],
             "name": (
                 f"{user.get('fname','')} "
                 f"{user.get('lname','')}"
             ).strip(),
             "login_time": datetime.utcnow().isoformat()
-        }
+        } 
 
         session_id = create_user_session(
             session_payload
