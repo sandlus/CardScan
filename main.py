@@ -147,7 +147,21 @@ def get_branding(
         print("BRANDING ERROR:", str(e))
         return fallback
 
+@app.get("/tenant-settings")
+def tenant_settings(
+    tenant_slug: str = Depends(
+        resolve_tenant_slug_from_request
+    )
+):
+    tenant = get_tenant_by_slug(
+        tenant_slug
+    )
 
+    return {
+        "status": True,
+        "tenant": tenant.slug,
+        "requires_login": tenant.requires_login
+    }
 @app.post("/save-card")
 def save_card(
     data: ScanCard,
