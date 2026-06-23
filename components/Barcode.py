@@ -18,6 +18,7 @@ from google.oauth2 import service_account
 
 from components.db import get_connection
 from components.tenant_resolver import get_tenant_by_slug, resolve_tenant_slug_from_request
+from components.auth_dependency import get_current_user
 
 router = APIRouter(prefix="/barcode", tags=["Barcode Scanner"])
 
@@ -884,6 +885,7 @@ def save_or_update_bill_item(
 async def save_hold_bill(
     payload: HoldBillPayload,
     request: Request,
+    current_user: dict = Depends(get_current_user),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     if not payload.items:
@@ -1016,6 +1018,7 @@ async def save_hold_bill(
 @router.get("/hold-bills")
 async def fetch_hold_bills(
     request: Request,
+    current_user=Depends(get_current_user),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     conn = None
@@ -1136,6 +1139,7 @@ async def fetch_hold_bills(
 @router.get("/all-bills")
 async def fetch_all_bills(
     request: Request,
+    current_user=Depends(get_current_user),
     from_date: Optional[str] = Query(default=None, description="Filter bills from this date YYYY-MM-DD"),
     to_date: Optional[str] = Query(default=None, description="Filter bills up to this date YYYY-MM-DD"),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
@@ -1233,6 +1237,7 @@ async def fetch_all_bills(
 async def get_bill_details(
     bill_id: int,
     request: Request,
+    current_user=Depends(get_current_user),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     conn = None
@@ -1371,6 +1376,7 @@ async def get_bill_details(
 async def thermal_print_data(
     bill_id: int,
     request: Request,
+    current_user=Depends(get_current_user),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     conn = None
@@ -1486,6 +1492,7 @@ async def thermal_print_data(
 async def submit_bill(
     payload: HoldBillPayload,
     request: Request,
+    current_user=Depends(get_current_user),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
     """Submit a bill.
@@ -1633,6 +1640,7 @@ async def get_capture_image(capture_path: str):
 @router.get("/model-search")
 async def search_products_by_model_number(
     request: Request,
+    current_user=Depends(get_current_user),
     model: str = Query("", description="Model number or barcode prefix"),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):
@@ -1681,6 +1689,7 @@ async def search_products_by_model_number(
 @router.post("/scan")
 async def scan_barcode(
     request: Request,
+    current_user=Depends(get_current_user),
     file: UploadFile = File(...),
     tenant_slug: str = Depends(resolve_tenant_slug_from_request),
 ):

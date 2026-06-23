@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, field_validator
-
+from components.auth_router import router as auth_router
 from components.catalog import router as catalog_router
 from components.db import get_connection
 from components.tenant_config import TENANTS
@@ -84,6 +84,8 @@ def clean_phone(val):
 app.include_router(catalog_router)
 app.include_router(business_card_router)
 app.include_router(barcode_router)
+app.include_router(auth_router)
+
 
 @app.get("/api/health")
 def health():
