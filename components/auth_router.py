@@ -27,6 +27,9 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class SSOLoginRequest(BaseModel):
+    token: str
+
 
 @router.post("/login")
 def login(
@@ -52,7 +55,7 @@ def login(
             pymysql.cursors.DictCursor
         )
 
-        # ----------------------------------------
+# ----------------------------------------
 # Check app_user
 # ----------------------------------------
 
@@ -123,38 +126,6 @@ def login(
                 detail="Invalid email or password"
             )
 
-        # query = """
-        #     SELECT
-        #         id,
-        #         fname,
-        #         lname,
-        #         email,
-        #         password,
-        #         role,
-        #         is_active
-        #     FROM app_user
-        #     WHERE email=%s
-        #     LIMIT 1
-        # """
-
-        # cursor.execute(
-        #     query,
-        #     (payload.email,)
-        # )
-
-        # user = cursor.fetchone()
-
-        # if not user:
-        #     raise HTTPException(
-        #         status_code=401,
-        #         detail="Invalid email or password"
-        #     )
-
-        # if int(user.get("is_active", 0)) != 0:
-        #     raise HTTPException(
-        #         status_code=403,
-        #         detail="User account is inactive"
-        #     )
 
         # ------------------------------------------------
         # CURRENT PASSWORD CHECK
@@ -180,12 +151,12 @@ def login(
         )
 
         response.set_cookie(
-        key="session_id",
-        value=session_id,
-        httponly=True,
-        secure=True,
-        samesite="None",
-        max_age=28800
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            max_age=28800
         )
 
         return {
@@ -198,7 +169,6 @@ def login(
                 "role": user["role"]
             }
         }
-
     except HTTPException:
         raise
 
@@ -243,6 +213,159 @@ def logout(
         "status": True,
         "message": "Logout successful"
     }
+
+
+@router.post("/sso-login")
+def sso_login(
+    request: Request,
+    response: Response,
+    data: SSOLoginRequest,
+    tenant_slug: str = Depends(resolve_tenant_slug_from_request)
+):
+    conn = None
+    cursor = None
+
+    try:
+
+        token = data.token.strip()
+
+        
+
+        if not token:
+            raise HTTPException(
+                status_code=400,
+                detail="SSO token is required"
+            )
+        incoming_hash = hashlib.sha256(
+            token.encode()
+        ).hexdigest()
+
+        tenant = get_tenant_by_slug(
+            tenant_slug
+        )
+
+        conn = get_connection(
+            tenant.db
+        )
+
+        cursor = conn.cursor(
+            pymysql.cursors.DictCursor
+        )
+
+        cursor.execute("""
+            SELECT
+                id,
+                user_id,
+                role,
+                sso_token,
+                expires_at,
+                login_time
+            FROM logins
+            WHERE sso_token=%s
+            LIMIT 1
+        """, (incoming_hash,))
+
+        login_record = cursor.fetchone()
+
+        if not login_record:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid SSO token"
+            )
+
+        if (
+            login_record["expires_at"] is not None
+            and login_record["expires_at"] < datetime.utcnow()
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="SSO token has expired"
+            )
+
+        # ----------------------------------------
+        # Fetch bay_users
+        # ----------------------------------------
+
+        cursor.execute("""
+            SELECT
+                id,
+                fname,
+                lname,
+                email,
+                role,
+                is_active
+            FROM bay_users
+            WHERE id=%s
+            LIMIT 1
+        """, (login_record["user_id"],))
+
+        user = cursor.fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="User not found"
+            )
+
+        if int(user.get("is_active", 0)) != 0:
+            raise HTTPException(
+                status_code=403,
+                detail="User account is inactive"
+            )
+        
+        session_payload = {
+            "user_id": user["id"],
+            "tenant": tenant.slug,
+            "email": user["email"],
+            "role": user["role"],
+            "source_table": "bay_users",
+            "name": (
+                f"{user.get('fname', '')} "
+                f"{user.get('lname', '')}"
+            ).strip(),
+            "login_time": datetime.utcnow().isoformat()
+        }
+
+        session_id = create_user_session(
+            session_payload
+        )
+
+        response.set_cookie(
+        key="session_id",
+        value=session_id,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=28800
+    )
+        
+        return {
+        "status": True,
+        "message": "SSO Login successful",
+        "user": {
+            "id": user["id"],
+            "name": session_payload["name"],
+            "email": user["email"],
+            "role": user["role"]
+        }
+    }
+    
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+    finally:
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()
 
 
 @router.get("/me")
